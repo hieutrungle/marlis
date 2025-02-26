@@ -1,22 +1,22 @@
-# Self Adjustable Reconfigurable Intelligent Surfaces (SARIS)
+# Multi-Agent Reinforcement Learning Intelligent Surfaces (MARLIS)
 
-[![Documentation Status](https://readthedocs.org/projects/saris/badge/?version=latest)](https://saris.readthedocs.io/en/latest/?badge=latest)
-[![PyPI version](https://badge.fury.io/py/saris.svg)](https://badge.fury.io/py/saris)
-[![Build Status](https://travis-ci.com/hieutrungle/saris.svg?branch=main)](https://travis-ci.com/hieutrungle/saris)
-[![codecov](https://codecov.io/gh/hieutrungle/saris/branch/main/graph/badge.svg?token=QZQZQZQZQZ)](https://codecov.io/gh/hieutrungle/saris)
+[![Documentation Status](https://readthedocs.org/projects/marlis/badge/?version=latest)](https://marlis.readthedocs.io/en/latest/?badge=latest)
+[![PyPI version](https://badge.fury.io/py/marlis.svg)](https://badge.fury.io/py/marlis)
+[![Build Status](https://travis-ci.com/hieutrungle/marlis.svg?branch=main)](https://travis-ci.com/hieutrungle/marlis)
+[![codecov](https://codecov.io/gh/hieutrungle/marlis/branch/main/graph/badge.svg?token=QZQZQZQZQZ)](https://codecov.io/gh/hieutrungle/marlis)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-<!-- .. image:: https://img.shields.io/pypi/v/saris.svg
-        :target: https://pypi.python.org/pypi/saris
+<!-- .. image:: https://img.shields.io/pypi/v/marlis.svg
+        :target: https://pypi.python.org/pypi/marlis
 
-.. image:: https://img.shields.io/travis/hieutrungle/saris.svg
-        :target: https://travis-ci.com/hieutrungle/saris
+.. image:: https://img.shields.io/travis/hieutrungle/marlis.svg
+        :target: https://travis-ci.com/hieutrungle/marlis
 
-.. image:: https://readthedocs.org/projects/saris/badge/?version=latest
-        :target: https://saris.readthedocs.io/en/latest/?badge=latest
+.. image:: https://readthedocs.org/projects/marlis/badge/?version=latest
+        :target: https://marlis.readthedocs.io/en/latest/?badge=latest
         :alt: Documentation Status -->
 
-Self Adjustable Reconfigurable Intelligent Surfaces (SARIS) / Self Adjustable Metallic Surfaces (SAMS)
+Multi-Agent Reinforcement Learning Intelligent Surfaces (MARLIS) / Self Adjustable Metallic Surfaces (SAMS)
 
 ## Installation
 
@@ -29,8 +29,8 @@ Self Adjustable Reconfigurable Intelligent Surfaces (SARIS) / Self Adjustable Me
 ```
 
 <!-- ```bash
-docker build -t pytorch-saris . -f Dockerfile
-docker run --rm --runtime=nvidia --gpus all -it saris
+docker build -t pytorch-marlis . -f Dockerfile
+docker run --rm --runtime=nvidia --gpus all -it marlis
 ``` -->
 
 ### Manual
@@ -99,8 +99,8 @@ Ensure you have NVIDIA drivers installed.
 
 ```bash
 cd home/research
-git clone -b torch-dev-angles https://github.com/hieutrungle/saris
-cd saris
+git clone https://github.com/hieutrungle/marlis
+cd marlis
 pip install -e .
 pip install torch==2.5.1
 pip install -r requirements.txt
@@ -111,14 +111,14 @@ pip install -r requirements.txt
 To run DRL SAC for narrow L-shaped hallway:
 
 ```bash
-cd home/research/saris
+cd home/research/marlis
 bash run_wireless_sac_static.sh
 ```
 
 To run DRL SAC for narrow L-shaped hallway with moving users:
 
 ```bash
-cd home/research/saris
+cd home/research/marlis
 bash run_wireless_sac_moving.sh
 ```
 
@@ -127,7 +127,7 @@ bash run_wireless_sac_moving.sh
 After running the DRL SAC, the directory should look like this:
 
 ```bash
-./home/research/saris
+./home/research/marlis
 ├── configs
 ├── default_scenes
 ├── docs
@@ -151,7 +151,7 @@ After running the DRL SAC, the directory should look like this:
 │       │   ├── rewards.png
 │       │   └── train_config.yaml
 │       ├── Run_name_idx_1
-├── saris
+├── marlis
 ...
 ```
 
@@ -193,7 +193,7 @@ ffmpeg -framerate 5 -i ./tmp_long_short_mean_adjusted_local_assets/images/SAC_Me
 
 ## Citing
 
-There is a series of papers that are being written to describe the SARIS project. Please cite the following paper if you use this package in your research:
+There is a series of papers that are being written to describe the MARLIS project. Please cite the following paper if you use this package in your research:
 
 First proof of concept paper:
 
