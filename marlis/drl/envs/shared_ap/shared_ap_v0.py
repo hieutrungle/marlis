@@ -439,7 +439,7 @@ class SharedAPV0(Env):
                 [local_channels, self.angles[i].flatten(), local_positions], axis=-1
             ).flatten()
             local_obs[i] = local_ob
-        info = {f"reset_local_obs": np.array(local_obs, dtype=np.float32)}
+        info = {f"reset_local_obs": local_obs}
 
         self.taken_steps = 0.0
 
@@ -450,16 +450,13 @@ class SharedAPV0(Env):
         self.taken_steps += 1.0
         self.prev_gains = self.cur_gains
 
-        # actions: [num_reflectors, num_groups * 3]: [r, theta, phi] for each group
-        acs = []
-        for a in action:
-            tmp = np.reshape(a, (self.num_groups, 3))
-            tmp[:, 0] = tmp[:, 0]
-            tmp[:, 1] = np.deg2rad(tmp[:, 1])
-            tmp[:, 2] = np.deg2rad(tmp[:, 2])
-            a = np.reshape(tmp, a.shape) * 5
-            acs.append(a)
-        action = np.asarray(acs, dtype=np.float32)
+        # actions: [num_reflectors * num_groups * 3]: [r, theta, phi] for each group
+        action = np.reshape(action, (len(self.rt_pos), -1))
+        tmp = np.reshape(action, (len(self.rt_pos) * self.num_groups, 3))
+        tmp[:, 0] = tmp[:, 0]  # r
+        tmp[:, 1] = np.deg2rad(tmp[:, 1])  # theta
+        tmp[:, 2] = np.deg2rad(tmp[:, 2])  # phi
+        action = np.reshape(tmp, self.focals.shape)
 
         # tmp = np.reshape(action, (self.num_groups, 3))
         # tmp[:, 0] = tmp[:, 0]
@@ -467,6 +464,7 @@ class SharedAPV0(Env):
         # tmp[:, 2] = np.deg2rad(tmp[:, 2])
         # action = np.reshape(tmp, action.shape)
 
+        # focal shape: [num_reflectors, num_groups * 3]
         self.focals = self.focals + action
         low = np.asarray([space.low for space in self.focal_spaces])
         high = np.asarray([space.high for space in self.focal_spaces])
@@ -512,21 +510,11 @@ class SharedAPV0(Env):
             local_positions = np.concatenate(
                 [self.rx_pos, self.rt_pos[i : i + 1]], axis=0
             ).flatten()
-            # print(f"local_channels: {local_channels}")
-            # print(f"local_channels shape: {local_channels.shape}")
-            # print(f"local_positions shape: {local_positions.shape}")
             local_ob = np.concatenate(
                 [local_channels, self.angles[i].flatten(), local_positions], axis=-1
             ).flatten()
             next_local_obs[i] = local_ob
-        step_info[f"next_local_obs"] = np.array(next_local_obs, dtype=np.float32)
-
-        # real_channels = np.asarray(channels.real, dtype=np.float32)
-        # imag_channels = np.asarray(channels.imag, dtype=np.float32)
-        # channels = np.concatenate([real_channels, imag_channels], axis=-1)
-        # next_observation = OrderedDict(
-        #     channels=channels, angles=self.angles, positions=self.positions
-        # )
+        step_info[f"next_local_obs"] = next_local_obs
 
         return next_observation, reward, terminated, truncated, step_info
 

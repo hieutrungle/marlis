@@ -124,10 +124,11 @@ def wandb_init(config: TrainConfig) -> None:
 def update_channel_rmss(channel_rmss: List[running_mean.RunningMeanStd], ob_storages: List[deque]):
     for i in range(3):
         channel_len = np.prod(channel_rmss[i].mean.shape)
-        channel_rmss[i].update(ob_storages[i].flatten()[..., :channel_len])
+        ob = torch.tensor(np.array(ob_storages[i]))[..., :channel_len]
+        channel_rmss[i].update(ob)
 
 
-def add_to_storage(storage: List[deque], data: List[torch.Tensor]):
+def add_to_storage(storage: List[deque], data: List[np.ndarray]):
     for i in range(3):
         storage[i].extend(data[i])
 
@@ -204,10 +205,10 @@ def main(config: TrainConfig):
         utils.log_config(sionna_config)
 
     # env setup
-    envs = gym.vector.AsyncVectorEnv(
-        [make_env(config, i) for i in range(config.num_envs)], context="spawn"
-    )
-    # envs = gym.vector.SyncVectorEnv([make_env(config, i) for i in range(config.num_envs)])
+    # envs = gym.vector.AsyncVectorEnv(
+    #     [make_env(config, i) for i in range(config.num_envs)], context="spawn"
+    # )
+    envs = gym.vector.SyncVectorEnv([make_env(config, i) for i in range(config.num_envs)])
 
     assert isinstance(
         envs.single_action_space, gym.spaces.Box
@@ -219,6 +220,7 @@ def main(config: TrainConfig):
 
     # Channel running meanstd
     channel_spaces = envs.get_attr("channel_spaces")[0]  # from 1st env
+    global_channel_space = envs.get_attr("global_channel_space")[0]  # from 1st env
     channel_rms0 = running_mean.RunningMeanStd(
         shape=(math.prod(channel_spaces[0].shape)),
     )
@@ -226,9 +228,9 @@ def main(config: TrainConfig):
         shape=(math.prod(channel_spaces[1].shape)),
     )
     gchannel_rms = running_mean.RunningMeanStd(
-        shape=(math.prod(channel_spaces[0].shape) + math.prod(channel_spaces[1].shape)),
+        shape=(math.prod(global_channel_space.shape)),
     )
-    channel_rmss = [channel_rms0, channel_rms1, gchannel_rms]
+    channel_rmss = [gchannel_rms, channel_rms0, channel_rms1]
 
     # Local actors
     actors = [
@@ -396,6 +398,8 @@ def train_agent(
     rb: ReplayBuffer,
 ):
 
+    wandb_init(config)
+
     qfs, qfs_target, gqfs, gqfs_target = critics
     actors_optimizer, qfs_optimizer, gqfs_optimizer, alphas_optimizer = optimizers
 
@@ -522,39 +526,49 @@ def train_agent(
     avg_returns = deque(maxlen=envs.num_envs)
     desc = ""
 
+    # ` TODO: DONE with ENV
     # info: {'env_idx': [num_envs, local_obs]}
-    obs, infos = envs.reset(options={"start_init": True, "eval_mode": True})
-    # shape: [num_envs, [num_reflectors, reflector_dim]]
-    local_obs = [ob for ob in infos["reset_local_obs"]]
-    add_to_storage(ob_storages, [obs] + local_obs)
+    obs, infos = envs.reset(options={"start_init": True, "eval_mode": False})
+    local_obs = infos["reset_local_obs"]
+    # shape: [num_envs, [num_reflectors, local_ob_dim]]
+    stored_local_obs = np.array([ob for ob in local_obs], dtype=np.float32)
+    # shape: [num_reflector, num_envs, local_ob_dim]
+    stored_local_obs = np.transpose(stored_local_obs, (1, 0, 2))
+    # List shape: [1 global + 2 locals, num_envs, obs_dim]
+    stored_obs = [obs] + [ob for ob in stored_local_obs]
+    add_to_storage(ob_storages, stored_obs)
 
     for global_step in pbar:
         # ALGO LOGIC: action logic
         with torch.no_grad():
-            if config.start_step == 0 and global_step < config.learning_starts * 9 / 10:
+            if config.start_step == 0 and global_step < config.learning_starts:
                 actions = np.array(
                     [envs.single_action_space.sample() for _ in range(envs.num_envs)]
                 )
             else:
-                # TODO: put local action here
+                # ` TODO: put local action here
                 actions = []
                 for i in range(2):
                     torch_local_obs = (
                         torch.Tensor(copy.deepcopy(local_obs[i])).float().to(config.device)
                     )
+                    # TODO: fix normalization for 1 global and 2 locals
                     torch_local_obs[i] = normalize_obs(torch_local_obs, channel_rmss[i], envs)
                     local_actions, _, _ = actors[i](torch_local_obs[i].to(config.device))
                     actions.append(local_actions.detach().cpu().numpy())
+                    print(f"local_actions: {local_actions.shape}")
+                print(f"actions: {actions}")
                 actions = np.concatenate(actions, axis=-1)
-                # torch_obs = torch.Tensor(copy.deepcopy(obs)).float().to(config.device)
-                # torch_obs = normalize_obs(torch_obs, channel_rms, envs)
-                # actions, _, _ = policy(torch_obs.to(config.device))
-                # actions = actions.detach().cpu().numpy()
+                print(f"actions: {actions}")
+                print(f"actions: {actions.shape}")
+        # ` TODO: DONE with random action transition
+        # TODO: Need to check if actions from the agent are correct
         next_obs, rewards, terminations, truncations, infos = envs.step(actions)
 
         # ENV: handle `final_observation`
         if "final_info" in infos:
             # log episodic returns
+            print(f"final info")
             for info in infos["final_info"]:
                 r = float(info["episode"]["r"][0])
                 max_ep_ret = max(max_ep_ret, r)
@@ -568,6 +582,7 @@ def train_agent(
             wandb.log(log_dict, step=global_step)
 
             # update channel rms normalization
+            # ` TODO: DONE with update channel_rmss
             if global_step <= config.learning_starts and config.load_model == "-1":
                 update_channel_rmss(channel_rmss, ob_storages)
 
@@ -600,14 +615,20 @@ def train_agent(
         # ENV: store transition
         obs = next_obs
         local_obs = next_local_obs
-        add_to_storage(ob_storages, [obs] + local_obs)
+        stored_local_obs = np.array([ob for ob in local_obs], dtype=np.float32)
+        # shape: [num_reflector, num_envs, local_ob_dim]
+        stored_local_obs = np.transpose(stored_local_obs, (1, 0, 2))
+        # List shape: [1 global + 2 locals, num_envs, obs_dim]
+        stored_obs = [obs] + [ob for ob in stored_local_obs]
+        # ` TODO: DONE with add_to_storage
+        add_to_storage(ob_storages, stored_obs)
 
         # ALGO LOGIC: training.
         if global_step > config.learning_starts:
 
-            # ALGO LOGIC: update critics and actors
+            # TODO: ALGO LOGIC: update critics and actors
 
-            # DATA: Store modules
+            # MODULE: Save modules
             if global_step % config.save_interval == 0 or global_step == last_step - 1:
                 actors_states = [actor.state_dict() for actor in actors]
                 qfs_states = [[qf.state_dict() for qf in qfs[i]] for i in range(2)]
