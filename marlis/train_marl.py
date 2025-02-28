@@ -128,7 +128,7 @@ def update_channel_rmss(channel_rmss: List[running_mean.RunningMeanStd], ob_stor
         channel_rmss[i].update(ob)
 
 
-def add_to_storage(storage: List[deque], data: List[np.ndarray]):
+def add_to_ob_storage(storage: List[deque], data: List[np.ndarray]):
     for i in range(3):
         storage[i].extend(data[i])
 
@@ -138,14 +138,29 @@ def normalize_obs(
     rms: running_mean.RunningMeanStd,
     envs: gym.vector.VectorEnv,
     epsilon: float = 1e-9,
+    ob_type: int = -1,
 ):
-
-    channel_space = envs.get_attr("channel_space")
-    angle_space = envs.get_attr("angle_space")
+    """
+    ob_type: int = -1
+        -1: global
+        0: local 0
+        1: local 1
+    """
+    print(f"flat_obs: {flat_obs}")
+    if ob_type == -1:
+        ac_space = envs.single_action_space
+        channel_space = envs.get_attr("global_channel_space")[0]
+        angle_space = envs.get_attr("global_angle_space")[0]
+        position_space = envs.get_attr("global_position_space")[0]
+    else:
+        ac_space = envs.get_attr("local_action_spaces")[0][ob_type]
+        channel_space = envs.get_attr("channel_spaces")[0][ob_type]
+        angle_space = envs.get_attr("angle_spaces")[0][ob_type]
+        position_space = envs.get_attr("position_spaces")[0][ob_type]
     # position_space = envs.get_attr("position_space")
 
     # channels
-    channel_len = math.prod(channel_space[0].shape)
+    channel_len = math.prod(channel_space.shape)
     channels = flat_obs[..., :channel_len]
     channels = torch.div(
         torch.sub(channels, rms.mean.to(device=channels.device, dtype=channels.dtype)),
@@ -153,14 +168,12 @@ def normalize_obs(
     )
 
     # angles
-    angle_len = math.prod(angle_space[0].shape)
+    angle_high = torch.tensor(angle_space.high, device=flat_obs.device, dtype=flat_obs.dtype)
+    angle_low = torch.tensor(angle_space.low, device=flat_obs.device, dtype=flat_obs.dtype)
+    angle_range = angle_high - angle_low
+    angle_len = math.prod(angle_space.shape)
     angles = flat_obs[..., channel_len : channel_len + angle_len]
-    init_angles = [math.radians(135.0)] + [math.radians(90.0)] * 7
-    init_angles = np.concatenate([init_angles] * 9)
-    # offset
-    angles = torch.sub(angles, torch.tensor(init_angles, device=angles.device, dtype=angles.dtype))
-    # # normalize
-    # angles = torch.div(torch.rad2deg(angles), 45.0)
+    angles = (angles - angle_low) / angle_range
 
     pos = flat_obs[..., channel_len + angle_len :]
     flat_obs = torch.cat([channels, angles, pos], dim=-1)
@@ -531,12 +544,12 @@ def train_agent(
     obs, infos = envs.reset(options={"start_init": True, "eval_mode": False})
     local_obs = infos["reset_local_obs"]
     # shape: [num_envs, [num_reflectors, local_ob_dim]]
-    stored_local_obs = np.array([ob for ob in local_obs], dtype=np.float32)
+    local_obs = np.array([ob for ob in local_obs], dtype=np.float32)
     # shape: [num_reflector, num_envs, local_ob_dim]
-    stored_local_obs = np.transpose(stored_local_obs, (1, 0, 2))
+    local_obs = np.transpose(local_obs, (1, 0, 2))
     # List shape: [1 global + 2 locals, num_envs, obs_dim]
-    stored_obs = [obs] + [ob for ob in stored_local_obs]
-    add_to_storage(ob_storages, stored_obs)
+    stored_obs = [obs] + [ob for ob in local_obs]
+    add_to_ob_storage(ob_storages, stored_obs)
 
     for global_step in pbar:
         # ALGO LOGIC: action logic
@@ -558,12 +571,14 @@ def train_agent(
                     actions.append(local_actions.detach().cpu().numpy())
                     print(f"local_actions: {local_actions.shape}")
                 print(f"actions: {actions}")
-                actions = np.concatenate(actions, axis=-1)
+                # actions = np.concatenate(actions, axis=-1)
                 print(f"actions: {actions}")
                 print(f"actions: {actions.shape}")
         # ` TODO: DONE with random action transition
         # TODO: Need to check if actions from the agent are correct
-        next_obs, rewards, terminations, truncations, infos = envs.step(actions)
+        next_obs, rewards, terminations, truncations, infos = envs.step(
+            np.concatenate(actions, axis=-1)
+        )
 
         # ENV: handle `final_observation`
         if "final_info" in infos:
@@ -612,21 +627,80 @@ def train_agent(
         real_next_obs = np.array(real_next_obs)
         real_next_local_obs = np.array(real_next_local_obs)
 
+        # LOCAL OBS: Reshape real_next_local_obs
+        # shape: [num_envs, [num_reflectors, local_ob_dim]]
+        real_next_local_obs = np.array([ob for ob in real_next_local_obs], dtype=np.float32)
+        # shape: [num_reflector, num_envs, local_ob_dim]
+        real_next_local_obs = np.transpose(real_next_local_obs, (1, 0, 2))
+        # List shape: [1 global + 2 locals, num_envs, obs_dim]
+        # stored_obs = [obs] + [ob for ob in real_next_local_obs]
+        # add_to_ob_storage(ob_storages, stored_obs)
+
+        # TODO: add to replay buffer
+        # TODO: TEST replay buffer
+        transition = TensorDict(
+            global_obs=obs,
+            local0_obs=local_obs[0],
+            local1_obs=local_obs[1],
+            local0_actions=actions[0],
+            local1_actions=actions[1],
+            rewards=rewards,
+            terminations=terminations,
+            truncations=truncations,
+            prev_path_gains=prev_path_gains,
+            path_gains=path_gains,
+            next_obs=real_next_obs,
+            next_local0_obs=real_next_local_obs[0],
+            next_local1_obs=real_next_local_obs[1],
+            batch_size=obs.shape[0],
+        )
+        rb.extend(transition)
+        print(f"transition: {transition}")
+
         # ENV: store transition
         obs = next_obs
         local_obs = next_local_obs
-        stored_local_obs = np.array([ob for ob in local_obs], dtype=np.float32)
+        local_obs = np.array([ob for ob in local_obs], dtype=np.float32)
         # shape: [num_reflector, num_envs, local_ob_dim]
-        stored_local_obs = np.transpose(stored_local_obs, (1, 0, 2))
+        local_obs = np.transpose(local_obs, (1, 0, 2))
         # List shape: [1 global + 2 locals, num_envs, obs_dim]
-        stored_obs = [obs] + [ob for ob in stored_local_obs]
-        # ` TODO: DONE with add_to_storage
-        add_to_storage(ob_storages, stored_obs)
+        stored_obs = [obs] + [ob for ob in local_obs]
+        # ` TODO: DONE with add_to_ob_storage
+        add_to_ob_storage(ob_storages, stored_obs)
 
         # ALGO LOGIC: training.
         if global_step > config.learning_starts:
 
             # TODO: ALGO LOGIC: update critics and actors
+            log_infos = {}
+            for j in range(config.n_updates):
+                # Normalize data
+                data = rb.sample()
+                data = {
+                    k: torch.as_tensor(v, device=config.device, dtype=torch.float)
+                    for k, v in data.items()
+                }
+                print(f"data: {data}")
+                # TODO: fix normalization for 1 global and 2 locals
+                data["global_obs"] = normalize_obs(
+                    data["global_obs"], channel_rmss[0], envs, ob_type=-1
+                )
+                data["local0_obs"] = normalize_obs(
+                    data["local0_obs"], channel_rmss[1], envs, ob_type=0
+                )
+                data["local1_obs"] = normalize_obs(
+                    data["local1_obs"], channel_rmss[2], envs, ob_type=1
+                )
+                data["next_global_obs"] = normalize_obs(
+                    data["next_global_obs"], channel_rmss[0], envs, ob_type=-1
+                )
+                data["next_local0_obs"] = normalize_obs(
+                    data["next_local0_obs"], channel_rmss[1], envs, ob_type=0
+                )
+                data["next_local1_obs"] = normalize_obs(
+                    data["next_local1_obs"], channel_rmss[2], envs, ob_type=1
+                )
+                print(f"data: {data}")
 
             # MODULE: Save modules
             if global_step % config.save_interval == 0 or global_step == last_step - 1:
