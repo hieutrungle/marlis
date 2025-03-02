@@ -591,7 +591,17 @@ def train_agent(
             actions = np.transpose(np.array(actions), (1, 0, 2))
             # action shape: [num_envs, num_reflector * local_ac_dim]
             actions = np.reshape(actions, (envs.num_envs, -1))
-        next_obs, rewards, terminations, truncations, infos = envs.step(actions)
+        try:
+            next_obs, rewards, terminations, truncations, infos = envs.step(actions)
+        except Exception as e:
+            traceback.print_exc()
+            # Close any multiprocesses from mp queue if present
+            for proc in mp.active_children():
+                # proc.terminate()
+                proc.join(timeout=60)
+            time.sleep(2)
+            obs, _ = envs.reset(seed=config.seed)
+            continue
 
         # ENV: handle `final_observation`
         if "final_info" in infos:
