@@ -17,7 +17,7 @@ class TrainConfig:
 
     # Run arguments
     init_learning_starts: int = 1001  # the timestep to start learning
-    n_runs: int = 11  # the number of runs
+    n_runs: int = 15  # the number of runs
     no_eval: bool = False  # whether to evaluate the model
 
     # General arguments
@@ -30,8 +30,10 @@ class TrainConfig:
     verbose: bool = False  # whether to log to console
     seed: int = 54  # seed of the experiment
     eval_seed: int = 7  # seed of the evaluation
-    save_interval: int = 150  # the interval to save the model
+    save_interval: int = 300  # the interval to save the model
     start_step: int = 0  # the starting step of the experiment
+
+    use_compile: bool = False  # whether to use torch.dynamo compiler
 
     # Environment specific arguments
     env_id: str = "shared-ap-v0"  # the environment id of the task
@@ -41,27 +43,27 @@ class TrainConfig:
     eval_ep_len: int = 100  # the maximum length of an episode
 
     # Network specific arguments
-    ff_dim: int = 256  # the hidden dimension of the feedforward networks
+    ff_dim: int = 128  # the hidden dimension of the feedforward networks
 
     # Algorithm specific arguments
     total_timesteps: int = 2_001  # total timesteps of the experiments
     n_updates: int = 5  # the number of updates per step
-    buffer_size: int = int(30_000)  # the replay memory buffer size
-    gamma: float = 0.985  # the discount factor gamma
+    buffer_size: int = int(40_000)  # the replay memory buffer size
+    gamma: float = 0.99  # the discount factor gamma
     tau: float = 0.005  # target smoothing coefficient (default: 0.005)
     batch_size: int = 256  # the batch size of sample from the reply memory
-    learning_starts: int = 3  # the timestep to start learning
-    policy_lr: float = 0.00018  # the learning rate of the policy network optimizer
-    q_lr: float = 0.0004  # the learning rate of the q network optimizer
+    learning_starts: int = 0  # the timestep to start learning
+    policy_lr: float = 0.0001  # the learning rate of the policy network optimizer
+    q_lr: float = 0.0002  # the learning rate of the q network optimizer
     warmup_steps: int = 300  # the number of warmup steps
-    policy_frequency: int = 2  # the frequency of training policy (delayed)
+    actor_frequency: int = 2  # the frequency of training policy (delayed)
     target_network_frequency: int = 2  # the frequency of updates for the target nerworks
 
     # Wandb logging
     wandb_mode: str = "online"  # wandb mode
-    project: str = "RMARL"  # wandb project name
-    group: str = "SAC"  # wandb group name
-    name: str = "Coverage_Map_Residual_MLP"  # wandb run name
+    project: str = "MARLIS"  # wandb project name
+    group: str = "MARL-SAC"  # wandb group name
+    name: str = "Shared_AP"  # wandb run name
 
     def __post_init__(self):
         lib_dir = importlib.resources.files(marlis)
@@ -193,6 +195,8 @@ def get_base_cmd(config: TrainConfig):
         str(config.save_interval),
         "--start_step",
         str(config.start_step),
+        "--use_compile",
+        str(config.use_compile),
         # environment specific arguments
         "--env_id",
         str(config.env_id),
@@ -228,8 +232,8 @@ def get_base_cmd(config: TrainConfig):
         str(config.q_lr),
         "--warmup_steps",
         str(config.warmup_steps),
-        "--policy_frequency",
-        str(config.policy_frequency),
+        "--actor_frequency",
+        str(config.actor_frequency),
         "--target_network_frequency",
         str(config.target_network_frequency),
         # wandb logging

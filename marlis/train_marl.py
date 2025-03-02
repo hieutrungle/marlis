@@ -58,6 +58,8 @@ class TrainConfig:
     save_interval: int = 100  # the interval to save the model
     start_step: int = 0  # the starting step of the experiment
 
+    use_compile: bool = False  # whether to use torch.dynamo compiler
+
     # Environment specific arguments
     env_id: str = "wireless-sigmap-v0"  # the environment id of the task
     sionna_config_file: str = "-1"  # Sionna config file
@@ -79,7 +81,7 @@ class TrainConfig:
     policy_lr: float = 3e-4  # the learning rate of the policy network optimizer
     q_lr: float = 1e-3  # the learning rate of the q network optimizer
     warmup_steps: int = 500  # the number of warmup steps
-    policy_frequency: int = 2  # the frequency of training policy (delayed)
+    actor_frequency: int = 2  # the frequency of training policy (delayed)
     target_network_frequency: int = 2  # the frequency of updates for the target nerworks
 
     # Wandb logging
@@ -146,7 +148,6 @@ def normalize_obs(
         0: local 0
         1: local 1
     """
-    print(f"flat_obs: {flat_obs}")
     if ob_type == -1:
         ac_space = envs.single_action_space
         channel_space = envs.get_attr("global_channel_space")[0]
@@ -218,16 +219,14 @@ def main(config: TrainConfig):
         utils.log_config(sionna_config)
 
     # env setup
-    # envs = gym.vector.AsyncVectorEnv(
-    #     [make_env(config, i) for i in range(config.num_envs)], context="spawn"
-    # )
-    envs = gym.vector.SyncVectorEnv([make_env(config, i) for i in range(config.num_envs)])
+    envs = gym.vector.AsyncVectorEnv(
+        [make_env(config, i) for i in range(config.num_envs)], context="spawn"
+    )
+    # envs = gym.vector.SyncVectorEnv([make_env(config, i) for i in range(config.num_envs)])
 
     assert isinstance(
         envs.single_action_space, gym.spaces.Box
     ), "only continuous action space is supported"
-    print(f"Observation space: {envs.single_observation_space}")
-    print(f"Action space: {envs.single_action_space}\n")
     ob_space = envs.single_observation_space
     ac_space = envs.single_action_space
 
@@ -253,8 +252,6 @@ def main(config: TrainConfig):
 
     local_ob_spaces = envs.get_attr("local_observation_spaces")[0]
     local_ac_spaces = envs.get_attr("local_action_spaces")[0]
-    print(f"Local Observation spaces: {local_ob_spaces}")
-    print(f"Local Action spaces: {local_ac_spaces}\n")
 
     tmp_local_obs = torch.randn((1, *local_ob_spaces[0].shape), device=config.device)
     torchinfo.summary(
@@ -404,7 +401,7 @@ def train_agent(
     config: TrainConfig,
     envs: gym.vector.VectorEnv,
     actors: List[marl_sac.Actor],
-    critics: List[marl_sac.SoftQNetwork],
+    critics: List[List[marl_sac.SoftQNetwork]],
     log_alphas: List[torch.Tensor],
     optimizers: List[optim.Optimizer],
     channel_rmss: List[running_mean.RunningMeanStd],
@@ -430,18 +427,18 @@ def train_agent(
         gqfs_optimizer.zero_grad()
 
         with torch.no_grad():
-            next_actions0, next_log_pi0, _ = actors[0].get_action(data["local_obs_0"])
-            qf_next_target00 = qfs_target[0][0](data["next_local_obs_0"], next_actions0)
-            qf_next_target01 = qfs_target[0][1](data["next_local_obs_0"], next_actions0)
+            next_actions0, next_log_pi0, _ = actors[0].get_action(data["local0_obs"])
+            qf_next_target00 = qfs_target[0][0](data["next_local0_obs"], next_actions0)
+            qf_next_target01 = qfs_target[0][1](data["next_local0_obs"], next_actions0)
             min_qf_next_target0 = torch.minimum(qf_next_target00, qf_next_target01)
             min_qf_next_target0 = min_qf_next_target0 - alphas[0] * next_log_pi0
             next_q_value0 = data["rewards"].flatten() + config.gamma * (
                 1.0 - data["terminations"].float().flatten()
             ) * min_qf_next_target0.view(-1)
 
-            next_actions1, next_log_pi1, _ = actors[1].get_action(data["local_obs_1"])
-            qf_next_target10 = qfs_target[1][0](data["next_local_obs_1"], next_actions1)
-            qf_next_target11 = qfs_target[1][1](data["next_local_obs_1"], next_actions1)
+            next_actions1, next_log_pi1, _ = actors[1].get_action(data["local1_obs"])
+            qf_next_target10 = qfs_target[1][0](data["next_local1_obs"], next_actions1)
+            qf_next_target11 = qfs_target[1][1](data["next_local1_obs"], next_actions1)
             min_qf_next_target1 = torch.minimum(qf_next_target10, qf_next_target11)
             min_qf_next_target1 = min_qf_next_target1 - alphas[1] * next_log_pi1
             next_q_value1 = data["rewards"].flatten() + config.gamma * (
@@ -449,8 +446,8 @@ def train_agent(
             ) * min_qf_next_target1.view(-1)
 
             next_actions = torch.cat([next_actions0, next_actions1], dim=-1)
-            gqf_next_target0 = gqfs_target[0](data["next_obs"], next_actions)
-            gqf_next_target1 = gqfs_target[1](data["next_obs"], next_actions)
+            gqf_next_target0 = gqfs_target[0](data["next_global_obs"], next_actions)
+            gqf_next_target1 = gqfs_target[1](data["next_global_obs"], next_actions)
             min_gqf_next_target = torch.minimum(gqf_next_target0, gqf_next_target1)
             min_gqf_next_target = (
                 min_gqf_next_target - alphas[0] * next_log_pi0 - alphas[1] * next_log_pi1
@@ -459,26 +456,26 @@ def train_agent(
                 1.0 - data["terminations"].float().flatten()
             ) * min_gqf_next_target.view(-1)
 
-        qf_values00 = qfs[0][0](data["local_obs_0"], data["local_actions_0"])
-        qf_loss00 = F.mse_loss(qf_values00, next_q_value0)
+        qf_values00 = qfs[0][0](data["local0_obs"], data["local0_actions"])
+        qf_loss00 = F.mse_loss(qf_values00.view(-1), next_q_value0)
 
-        qf_values01 = qfs[0][1](data["local_obs_0"], data["local_actions_0"])
-        qf_loss01 = F.mse_loss(qf_values01, next_q_value0)
+        qf_values01 = qfs[0][1](data["local0_obs"], data["local0_actions"])
+        qf_loss01 = F.mse_loss(qf_values01.view(-1), next_q_value0)
 
-        qf_values10 = qfs[1][0](data["local_obs_1"], data["local_actions_1"])
-        qf_loss10 = F.mse_loss(qf_values10, next_q_value1)
+        qf_values10 = qfs[1][0](data["local1_obs"], data["local1_actions"])
+        qf_loss10 = F.mse_loss(qf_values10.view(-1), next_q_value1)
 
-        qf_values11 = qfs[1][1](data["local_obs_1"], data["local_actions_1"])
-        qf_loss11 = F.mse_loss(qf_values11, next_q_value1)
+        qf_values11 = qfs[1][1](data["local1_obs"], data["local1_actions"])
+        qf_loss11 = F.mse_loss(qf_values11.view(-1), next_q_value1)
 
         qf_loss = qf_loss00 + qf_loss01 + qf_loss10 + qf_loss11
         qf_loss.backward()
         qfs_optimizer.step()
 
-        gqf_values0 = gqfs[0](data["obs"], data["actions"])
-        gqf_loss0 = F.mse_loss(gqf_values0, next_gq_value)
-        gqf_values1 = gqfs[1](data["obs"], data["actions"])
-        gqf_loss1 = F.mse_loss(gqf_values1, next_gq_value)
+        gqf_values0 = gqfs[0](data["global_obs"], data["global_actions"])
+        gqf_loss0 = F.mse_loss(gqf_values0.view(-1), next_gq_value)
+        gqf_values1 = gqfs[1](data["global_obs"], data["global_actions"])
+        gqf_loss1 = F.mse_loss(gqf_values1.view(-1), next_gq_value)
         gqf_loss = gqf_loss0 + gqf_loss1
         gqf_loss.backward()
         gqfs_optimizer.step()
@@ -490,26 +487,33 @@ def train_agent(
 
     def update_actors(data):
         actors_optimizer.zero_grad()
-        pi0, log_pi0, _ = actors[0].get_action(data["local_obs_0"])
-        qf_values00 = qfs[0][0](data["local_obs_0"], pi0)
-        qf_values01 = qfs[0][1](data["local_obs_0"], pi0)
+        pi0, log_pi0, _ = actors[0].get_action(data["local0_obs"])
+        qf_values00 = qfs[0][0](data["local0_obs"], pi0)
+        qf_values01 = qfs[0][1](data["local0_obs"], pi0)
         min_qf_values0 = torch.minimum(qf_values00, qf_values01)
         actor_loss0 = (alphas[0] * log_pi0 - min_qf_values0).mean()
 
-        pi1, log_pi1, _ = actors[1].get_action(data["local_obs_1"])
-        qf_values10 = qfs[1][0](data["local_obs_1"], pi1)
-        qf_values11 = qfs[1][1](data["local_obs_1"], pi1)
+        pi1, log_pi1, _ = actors[1].get_action(data["local1_obs"])
+        qf_values10 = qfs[1][0](data["local1_obs"], pi1)
+        qf_values11 = qfs[1][1](data["local1_obs"], pi1)
         min_qf_values1 = torch.minimum(qf_values10, qf_values11)
         actor_loss1 = (alphas[1] * log_pi1 - min_qf_values1).mean()
 
-        actor_loss = actor_loss0 + actor_loss1
+        # Add global critic loss
+        pi = torch.cat([pi0, pi1], dim=-1)
+        gqf_values0 = gqfs[0](data["global_obs"], pi)
+        gqf_values1 = gqfs[1](data["global_obs"], pi)
+        gqf_values = torch.minimum(gqf_values0, gqf_values1)
+
+        actor_loss = actor_loss0 + actor_loss1 - gqf_values.mean()
+
         actor_loss.backward()
         actors_optimizer.step()
 
         alphas_optimizer.zero_grad()
         with torch.no_grad():
-            _, log_pi0, _ = actors[0].get_action(data["local_obs_0"])
-            _, log_pi1, _ = actors[1].get_action(data["local_obs_1"])
+            _, log_pi0, _ = actors[0].get_action(data["local0_obs"])
+            _, log_pi1, _ = actors[1].get_action(data["local1_obs"])
         alpha_loss0 = (log_alphas[0] * (-log_pi0 - target_entropys[0])).mean()
         alpha_loss1 = (log_alphas[1] * (-log_pi1 - target_entropys[1])).mean()
         alpha_loss = alpha_loss0 + alpha_loss1
@@ -519,71 +523,77 @@ def train_agent(
         return TensorDict(
             actor_loss=actor_loss.detach(),
             alpha_loss=alpha_loss.detach(),
+            qf0_val=min_qf_values0.detach(),
+            qf1_val=min_qf_values1.detach(),
+            gqf_val=gqf_values.detach(),
+            log_pi0=log_pi0.detach(),
+            log_pi1=log_pi1.detach(),
         )
 
-    update_critics = torch.compile(update_critics, dynamic=False, fullgraph=True)
-    update_actors = torch.compile(update_actors, dynamic=False, fullgraph=True)
+    if config.use_compile:
+        update_critics = torch.compile(update_critics, dynamic=False)
+        update_actors = torch.compile(update_actors, dynamic=False)
+    # update_critics = torch.compile(update_critics, dynamic=False, fullgraph=True)
+    # update_actors = torch.compile(update_actors, dynamic=False, fullgraph=True)
 
     # storage to update channel running meanstd
     ob_storages = [deque(maxlen=config.num_envs * config.ep_len) for _ in range(3)]
 
     # training loop
     last_step = config.start_step + config.total_timesteps
-    pbar = tqdm.tqdm(
-        range(config.start_step, config.start_step + config.total_timesteps + 1),
-        dynamic_ncols=True,
-        initial=config.start_step,
-        total=config.start_step + config.total_timesteps + 1,
-    )
     max_ep_ret = -float("inf")
     avg_returns = deque(maxlen=envs.num_envs)
-    desc = ""
 
-    # ` TODO: DONE with ENV
-    # info: {'env_idx': [num_envs, local_obs]}
-    obs, infos = envs.reset(options={"start_init": True, "eval_mode": False})
-    local_obs = infos["reset_local_obs"]
+    if config.command.lower() == "train":
+        pbar = tqdm.tqdm(
+            range(config.start_step, config.start_step + config.total_timesteps + 1),
+            dynamic_ncols=True,
+            initial=config.start_step,
+            total=config.start_step + config.total_timesteps + 1,
+        )
+        # info: {'env_idx': [num_envs, local_obs]}
+        obs, infos = envs.reset(options={"start_init": True, "eval_mode": False})
+    else:
+        pbar = tqdm.tqdm(range(config.eval_ep_len), dynamic_ncols=True)
+        obs, infos = envs.reset(options={"start_init": True, "eval_mode": True})
+
     # shape: [num_envs, [num_reflectors, local_ob_dim]]
-    local_obs = np.array([ob for ob in local_obs], dtype=np.float32)
+    local_obs = np.array([ob for ob in infos["reset_local_obs"]], dtype=np.float32)
     # shape: [num_reflector, num_envs, local_ob_dim]
     local_obs = np.transpose(local_obs, (1, 0, 2))
-    # List shape: [1 global + 2 locals, num_envs, obs_dim]
     stored_obs = [obs] + [ob for ob in local_obs]
     add_to_ob_storage(ob_storages, stored_obs)
 
+    desc = ""
+    metric_desc = ""
+
     for global_step in pbar:
         # ALGO LOGIC: action logic
-        with torch.no_grad():
-            if config.start_step == 0 and global_step < config.learning_starts:
-                actions = np.array(
-                    [envs.single_action_space.sample() for _ in range(envs.num_envs)]
-                )
-            else:
-                # ` TODO: put local action here
-                actions = []
-                for i in range(2):
-                    torch_local_obs = (
-                        torch.Tensor(copy.deepcopy(local_obs[i])).float().to(config.device)
-                    )
-                    # TODO: fix normalization for 1 global and 2 locals
-                    torch_local_obs[i] = normalize_obs(torch_local_obs, channel_rmss[i], envs)
-                    local_actions, _, _ = actors[i](torch_local_obs[i].to(config.device))
+        if config.start_step == 0 and global_step < config.learning_starts:
+            # [num_envs, global_ac_dim], global_ac_dim = num_reflectors * local_ac_dim
+            actions = np.array([envs.single_action_space.sample() for _ in range(envs.num_envs)])
+        else:
+            # ` TODO: put local action here
+            # [num_envs, global_ac_dim], global_ac_dim = num_reflectors * local_ac_dim
+            actions = []
+            # shape: [num_reflector, num_envs, local_ob_dim]
+            torch_local_obs = torch.Tensor(local_obs.copy()).float().to(config.device)
+            torch_local_obs[0] = normalize_obs(torch_local_obs[0], channel_rmss[1], envs, ob_type=0)
+            torch_local_obs[1] = normalize_obs(torch_local_obs[1], channel_rmss[2], envs, ob_type=1)
+            for i in range(2):
+                # [num_envs, local_ac_dim]
+                with torch.no_grad():
+                    local_actions, _, _ = actors[i].get_action(torch_local_obs[i].to(config.device))
                     actions.append(local_actions.detach().cpu().numpy())
-                    print(f"local_actions: {local_actions.shape}")
-                print(f"actions: {actions}")
-                # actions = np.concatenate(actions, axis=-1)
-                print(f"actions: {actions}")
-                print(f"actions: {actions.shape}")
-        # ` TODO: DONE with random action transition
-        # TODO: Need to check if actions from the agent are correct
-        next_obs, rewards, terminations, truncations, infos = envs.step(
-            np.concatenate(actions, axis=-1)
-        )
+            # [num_reflector, num_envs, local_ac_dim] -> [num_envs, num_reflector, local_ac_dim]
+            actions = np.transpose(np.array(actions), (1, 0, 2))
+            # action shape: [num_envs, num_reflector * local_ac_dim]
+            actions = np.reshape(actions, (envs.num_envs, -1))
+        next_obs, rewards, terminations, truncations, infos = envs.step(actions)
 
         # ENV: handle `final_observation`
         if "final_info" in infos:
             # log episodic returns
-            print(f"final info")
             for info in infos["final_info"]:
                 r = float(info["episode"]["r"][0])
                 max_ep_ret = max(max_ep_ret, r)
@@ -632,30 +642,31 @@ def train_agent(
         real_next_local_obs = np.array([ob for ob in real_next_local_obs], dtype=np.float32)
         # shape: [num_reflector, num_envs, local_ob_dim]
         real_next_local_obs = np.transpose(real_next_local_obs, (1, 0, 2))
-        # List shape: [1 global + 2 locals, num_envs, obs_dim]
-        # stored_obs = [obs] + [ob for ob in real_next_local_obs]
-        # add_to_ob_storage(ob_storages, stored_obs)
 
-        # TODO: add to replay buffer
-        # TODO: TEST replay buffer
+        rewards = np.asarray(rewards, dtype=np.float32)[..., None]
+        terminations = np.asarray(terminations, dtype=np.float32)[..., None]
+        truncations = np.asarray(truncations, dtype=np.float32)[..., None]
+        local_actions = np.reshape(actions, (envs.num_envs, 2, -1))
+        local_actions = np.transpose(local_actions, (1, 0, 2))
+
         transition = TensorDict(
             global_obs=obs,
+            global_actions=actions,
             local0_obs=local_obs[0],
             local1_obs=local_obs[1],
-            local0_actions=actions[0],
-            local1_actions=actions[1],
+            local0_actions=local_actions[0],
+            local1_actions=local_actions[1],
             rewards=rewards,
             terminations=terminations,
             truncations=truncations,
             prev_path_gains=prev_path_gains,
             path_gains=path_gains,
-            next_obs=real_next_obs,
+            next_global_obs=real_next_obs,
             next_local0_obs=real_next_local_obs[0],
             next_local1_obs=real_next_local_obs[1],
             batch_size=obs.shape[0],
         )
         rb.extend(transition)
-        print(f"transition: {transition}")
 
         # ENV: store transition
         obs = next_obs
@@ -670,9 +681,9 @@ def train_agent(
 
         # ALGO LOGIC: training.
         if global_step > config.learning_starts:
-
-            # TODO: ALGO LOGIC: update critics and actors
+            # ALGO LOGIC: update critics and actors
             log_infos = {}
+            timer = time.time()
             for j in range(config.n_updates):
                 # Normalize data
                 data = rb.sample()
@@ -680,8 +691,6 @@ def train_agent(
                     k: torch.as_tensor(v, device=config.device, dtype=torch.float)
                     for k, v in data.items()
                 }
-                print(f"data: {data}")
-                # TODO: fix normalization for 1 global and 2 locals
                 data["global_obs"] = normalize_obs(
                     data["global_obs"], channel_rmss[0], envs, ob_type=-1
                 )
@@ -700,7 +709,58 @@ def train_agent(
                 data["next_local1_obs"] = normalize_obs(
                     data["next_local1_obs"], channel_rmss[2], envs, ob_type=1
                 )
-                print(f"data: {data}")
+                data = TensorDict(data)
+
+                # Update critics
+                critic_infos = update_critics(data)
+                log_infos.update(critic_infos)
+
+                if j % config.actor_frequency == 1:  # TD 3 Delayed update support
+                    for _ in range(config.actor_frequency):
+                        # compensate for the delay by doing 'actor_update_interval' instead of 1
+                        log_infos.update(update_actors(data))
+
+                        for k in range(len(log_alphas)):
+                            with torch.no_grad():
+                                log_alphas[k].clamp_(-5.0, 1.0)
+                                alphas[k].copy_(log_alphas[k].detach().exp())
+                                alphas[k] = torch.clamp(alphas[k], 0.1, 0.95)
+
+                # update the target networks
+                if global_step % config.target_network_frequency == 0:
+                    for k in range(2):
+                        for qf, qf_target in zip(qfs[k], qfs_target[k]):
+                            update_target_network(qf, qf_target, config)
+                    for gqf, gqf_target in zip(gqfs, gqfs_target):
+                        update_target_network(gqf, gqf_target, config)
+
+            train_time = time.time() - timer
+
+            with torch.no_grad():
+                logs = {
+                    "train_reward/path_gain": path_gains.mean(),
+                    "train_reward/path_gain_std": path_gains.std(),
+                    "train_reward/path_gain_diff": (path_gains - prev_path_gains).mean(),
+                    "train_reward/reward_mean": rewards.mean(),
+                    "train_reward/reward_std": rewards.std(),
+                    "train/actor_loss": log_infos["actor_loss"].mean().item(),
+                    "train/alpha_loss": log_infos["alpha_loss"].mean().item(),
+                    "train/qf_loss": log_infos["qf_loss"].mean().item(),
+                    "train/gqf_loss": log_infos["gqf_loss"].mean().item(),
+                    "train/qf0": log_infos["qf0_val"].mean().item(),
+                    "train/qf1": log_infos["qf1_val"].mean().item(),
+                    "train/gqf": log_infos["gqf_val"].mean().item(),
+                    "train/alpha0": alphas[0].item(),
+                    "train/alpha1": alphas[1].item(),
+                    "train/log_alpha0": log_alphas[0].clone().detach().item(),
+                    "train/log_alpha1": log_alphas[1].clone().detach().item(),
+                    "train/actor0_entropy": (-log_infos["log_pi0"]).mean().item(),
+                    "train/actor1_entropy": (-log_infos["log_pi1"]).mean().item(),
+                    "train/train_time": train_time,
+                }
+
+            wandb.log({**logs}, step=global_step)
+            metric_desc = f" | actor_loss={logs['train/actor_loss']: 4.3f} | qf_loss={logs['train/qf_loss']: 4.3f}"
 
             # MODULE: Save modules
             if global_step % config.save_interval == 0 or global_step == last_step - 1:
@@ -733,7 +793,12 @@ def train_agent(
                     os.path.join(config.checkpoint_dir, f"model.pth"),
                 )
 
-        pbar.set_description(desc)
+        pbar.set_description(desc + metric_desc)
+
+
+def update_target_network(qf, qf_target, config):
+    for param, target_param in zip(qf.parameters(), qf_target.parameters()):
+        target_param.data.copy_(config.tau * param.data + (1 - config.tau) * target_param.data)
 
 
 if __name__ == "__main__":

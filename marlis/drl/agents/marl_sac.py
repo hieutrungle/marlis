@@ -104,7 +104,7 @@ class Actor(nn.Module):
         self.register_buffer(
             "action_scale",
             torch.tensor(
-                (envs.single_action_space.high - envs.single_action_space.low) / 2.0,
+                (ac_space.high - ac_space.low) / 2.0,
                 dtype=torch.float32,
                 device=device,
             ),
@@ -112,7 +112,7 @@ class Actor(nn.Module):
         self.register_buffer(
             "action_bias",
             torch.tensor(
-                (envs.single_action_space.high + envs.single_action_space.low) / 2.0,
+                (ac_space.high + ac_space.low) / 2.0,
                 dtype=torch.float32,
                 device=device,
             ),
