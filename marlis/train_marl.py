@@ -186,7 +186,9 @@ def make_env(config: TrainConfig, idx: int) -> Callable:
     def thunk() -> gym.Env:
 
         seed = config.seed
-        max_episode_steps = config.ep_len
+        max_episode_steps = (
+            config.ep_len if config.command.lower() == "train" else config.eval_ep_len
+        )
         seed += idx
         env = gym.make(
             config.env_id,
