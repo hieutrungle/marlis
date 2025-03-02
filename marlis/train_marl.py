@@ -370,6 +370,7 @@ def main(config: TrainConfig):
             actors_optimizer.load_state_dict(checkpoint["actors_optimizer"])
             qfs_optimizer.load_state_dict(checkpoint["qfs_optimizer"])
             gqfs_optimizer.load_state_dict(checkpoint["gqfs_optimizer"])
+            alphas_optimizer = optim.AdamW(list(log_alphas), lr=config.q_lr)
             alphas_optimizer.load_state_dict(checkpoint["alphas_optimizer"])
 
     # replay buffer setup
