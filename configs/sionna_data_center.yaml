@@ -1,17 +1,17 @@
-base_config: shared_ap
-scene_name: shared_ap
+base_config: data_center
+scene_name: data_center
 resolution: [1920, 1080]
-cm_vmin: -120
+cm_vmin: -100
 cm_vmax: -60
 verbose: true
-cam_position: [0.0, -11.1, 50.0]
+cam_position: [0.0, -0.1, 34.0]
 cam_orientation: [0.0, 0.0, 0.0]
-cam_look_at: [0.0, -11.0, 0.0]
-frequency: 28e9
+cam_look_at: [0.0, -0.0, 0.0]
+frequency: 60e9
 synthetic_array: true
 
 # Reflector parameters
-rt_positions: [[7.5, -3.4, 3.0606], [-7.5, -3.4, 3.03208]]
+rt_positions: [[5.8, 0.0, 3.0], [-5.8, 0.0, 3.0]]
 
 # Transmitter and receiver parameters
 tx_num_rows: 1
@@ -20,7 +20,7 @@ tx_vertical_spacing: 0.5
 tx_horizontal_spacing: 0.5
 tx_pattern: tr38901
 tx_polarization: V
-tx_positions: [[0.0, 11.95, 4.0], [0.0, -11.95, 4.0]]
+tx_positions: [[0.0, 0.0, 3.9], [0.0, 0.0, 3.9]]
 tx_orientations: [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]]
 rx_num_rows: 1
 rx_num_cols: 1
