@@ -81,4 +81,4 @@ mkdir -p ${OPTIX_CACHE_PATH}
 export OPTIX_CACHE_PATH=${TMP_DIR}/optix_cache_1
 # python ./marlis/run_marl.py --sionna_config_file ${SIONNA_CONFIG_FILE} --verbose True --env_id "data-center-v0" --group "DataCenter" --name "TEST_no_compile" --ff_dim 128 --save_interval 10 --learning_starts 0 --total_timesteps 40 --n_runs 0 --init_learning_starts 20 --ep_len 10 --batch_size 8 --num_envs 2 --eval_ep_len 10 --seed 22 --wandb "offline"
 
-python ./marlis/run_marl.py --sionna_config_file ${SIONNA_CONFIG_FILE} --verbose True --env_id "shared-ap-v0" --group "DataCenter" --name "Default" --use_compile True
+python ./marlis/run_marl.py --sionna_config_file ${SIONNA_CONFIG_FILE} --verbose True --env_id "data-center-v0" --group "DataCenter" --name "Default" --use_compile True
