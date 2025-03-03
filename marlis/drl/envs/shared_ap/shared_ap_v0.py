@@ -564,6 +564,8 @@ class SharedAPV0(Env):
             "--python",
             blender_script,
             "--",
+            "-s",
+            self.sionna_config["scene_name"],
             "-i",
             data_path,
             "-o",
