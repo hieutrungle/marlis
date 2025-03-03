@@ -45,6 +45,14 @@ def prepare_scene(config, filename, cam=None):
         rx = Receiver(f"rx_{i}", rx_pos, rx_orient, color=[0.99, 0.01, 0.99])
         scene.add(rx)
 
+    #########################################
+    # Metal 01
+    #########################################
+    rm = sionna.rt.radio_material.RadioMaterial(
+        "itu_metal_01", relative_permittivity=1.0, conductivity=1e7
+    )
+    sionna.rt.scene.Scene().add(rm)
+
     return scene
 
 
