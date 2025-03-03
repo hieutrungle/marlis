@@ -17,27 +17,25 @@ import bl_utils, bl_parser, shared_utils
 
 def export_drl_hallway_hex(args):
 
-    # TODO: script to modify 2 reflectors
     # unit: radians
-    theta_config, phi_config, num_groups, num_elements_per_group = (
-        shared_utils.get_config_shared_ap()
-    )
-    # print(f"theta_config: {[math.degrees(x) for x in theta_config]}")
-    # print(f"phi_config: {[math.degrees(x) for x in phi_config]}")
+    if args.scene_name.lower() == "shared_ap":
+        theta_config, phi_config, num_groups, num_elements_per_group = (
+            shared_utils.get_config_shared_ap()
+        )
+    elif args.scene_name.lower() == "data_center":
+        theta_config, phi_config, num_groups, num_elements_per_group = (
+            shared_utils.get_config_data_center()
+        )
+    else:
+        raise ValueError("Invalid scene name")
 
     theta_ranges = [(theta_config[1][i], theta_config[2][i]) for i in range(len(theta_config[1]))]
     phi_ranges = [(phi_config[1][i], phi_config[2][i]) for i in range(len(phi_config[1]))]
-    # print(
-    #     f"theta_ranges: {[[math.degrees(x) for x in theta_range] for theta_range in theta_ranges]}"
-    # )
-    # print(f"phi_ranges: {[[math.degrees(x) for x in phi_range] for phi_range in phi_ranges]}")
 
     with open(args.input_path, "rb") as f:
         # data: Tuple[np.ndarray[float], np.ndarray[float]]
         focals = pickle.load(f)
-    # print(f"focal: {focals}")
     focals = [focal.reshape(num_groups, 3) for focal in focals]
-    # print(f"focal: {focals}")
 
     # Angle container
     angles = [
@@ -47,9 +45,10 @@ def export_drl_hallway_hex(args):
     # Set up devices
     # 'devices' contains multiple reflectors
     # each reflector has groups of tiles
+    obstacles_names = []
+    racks_names = []
     devices_names = []
     devices = {}
-    # object_dict = {f"Group{i:02d}": [] for i in range(1, num_groups + 1)}
 
     ref_idx = 0
     for k, v in bpy.data.collections.items():
@@ -68,10 +67,11 @@ def export_drl_hallway_hex(args):
             devices[k] = object_dict
             ref_idx += 1
 
-    # for k, v in devices.items():
-    #     print(k)
-    #     for k1, v1 in v.items():
-    #         print(f"  {k1}: {v1}")
+        if "RackFrame" in k:
+            racks_names.append(k)
+
+        if "Obstacles" in k:
+            obstacles_names.append(k)
 
     for i, (reflector, focal) in enumerate(zip(devices_names, focals)):
         object_dict = devices[reflector]
@@ -92,37 +92,9 @@ def export_drl_hallway_hex(args):
                 obj.rotation_euler = [0, theta, phi]
                 angles[i][j * (num_elements_per_group + 1) + k + 1] = theta
 
-    # for i, angle in enumerate(angles):
-    #     angle = [math.degrees(x) for x in angle]
-    #     print(f"angle {i}: {angle}")
-    #     print()
-
-    # exit()
     result_path = args.input_path
     with open(result_path, "wb") as f:
         pickle.dump(angles, f)
-
-    # exit()
-
-    # for i, (group_name, objects) in enumerate(object_dict.items()):
-    #     mid_tile = objects[num_elements_per_group // 2]
-    #     r_mid, theta_mid, phi_mid = spherical_focal_vecs[i]
-    #     # print(
-    #     #     f"r_mid: {r_mid}, theta_mid: {math.degrees(theta_mid)}, phi_mid: {math.degrees(phi_mid)}"
-    #     # )
-    #     focal_vec = bl_utils.spherical2cartesian(r_mid, theta_mid, phi_mid)
-    #     focal_pt = bl_utils.get_center_bbox(mid_tile) + Vector(focal_vec)
-    #     theta_mid = shared_utils.constraint_angle(theta_mid, theta_range)
-    #     angles[i * (num_elements_per_group + 1)] = phi_mid
-
-    #     for j, obj in enumerate(objects):
-    #         center = bl_utils.get_center_bbox(obj)
-    #         r, theta, phi = bl_utils.compute_rot_angle(center, focal_pt)
-    #         theta = shared_utils.constraint_angle(theta, theta_range)
-    #         phi = shared_utils.constraint_angle(phi, phi_range)
-    #         # print(f"r: {r}, theta: {math.degrees(theta)}, phi: {math.degrees(phi)}")
-    #         obj.rotation_euler = [0, theta, phi]
-    #         angles[i * (num_elements_per_group + 1) + j + 1] = theta
 
     result_path = args.input_path
     with open(result_path, "wb") as f:
@@ -131,27 +103,29 @@ def export_drl_hallway_hex(args):
     # Save files without ceiling
     folder_dir = os.path.join(args.output_dir, f"idx")
     bl_utils.mkdir_with_replacement(folder_dir)
-    bl_utils.save_mitsuba_xml(folder_dir, "hallway", [*devices_names, "Wall", "Floor", "Obstacles"])
+    bl_utils.save_mitsuba_xml(
+        folder_dir, "scenee", [*devices_names, *racks_names, *obstacles_names, "Wall", "Floor"]
+    )
 
     # Save files with ceiling
     folder_dir = os.path.join(args.output_dir, f"ceiling_idx")
     bl_utils.mkdir_with_replacement(folder_dir)
     bl_utils.save_mitsuba_xml(
         folder_dir,
-        "hallway",
-        [*devices_names, "Wall", "Floor", "Ceiling", "Obstacles"],
+        "scenee",
+        [*devices_names, *racks_names, *obstacles_names, "Wall", "Floor", "Ceiling", "TopPanel"],
     )
 
 
 def main():
     args = create_argparser().parse_args()
-    # export_drl_hallway_angle(args)
     export_drl_hallway_hex(args)
 
 
 def create_argparser() -> bl_parser.ArgumentParserForBlender:
     """Parses command line arguments."""
     parser = bl_parser.ArgumentParserForBlender()
+    parser.add_argument("--scene_name", "-s", type=str, required=True)
     parser.add_argument("--input_path", "-i", type=str, required=True)
     parser.add_argument("--output_dir", "-o", type=str, required=True)
     parser.add_argument("--verbose", "-v", action="store_true", default=False)
