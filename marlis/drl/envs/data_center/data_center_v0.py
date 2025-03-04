@@ -515,9 +515,9 @@ class DataCenterV0(Env):
 
         adjusted_gain = np.mean(cur_gains)
         adjusted_gain = np.where(
-            adjusted_gain < -95.0,
-            (adjusted_gain + 95.0) / 10.0,
-            (adjusted_gain + 95.0) / 5.0 + 1.5,
+            adjusted_gain < -80.0,
+            (adjusted_gain + 80.0) / 10.0,
+            (adjusted_gain + 80.0) / 5.0 + 1.5,
         )
         gain_diff = np.mean(cur_gains - prev_gains)
 
