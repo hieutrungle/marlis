@@ -175,8 +175,20 @@ class DataCenterV0(Env):
         self.cur_gains = [0.0 for _ in range(len(self.rx_pos))]
 
         # range for new rx positions
-        self.rx_pos_range = [[-4.0, 4.0], [-19.5, -10.0]]  # x  # y
+        # self.rx_pos_range = [[-4.0, 4.0], [-19.5, -10.0]]  # x  # y
         self.obstacle_pos = [[2.37, -17.656], [-2.6, -11.945], [1.86, -10.7654], [-1.71, -15.6846]]
+
+        # range for new rx positions: [[x_min, x_max], [y_min, y_max]]
+        self.rx_pos_ranges = [
+            [[-2.7, -1.3], [2.9, 4.5]],
+            [[-2.7, -1.3], [0.4, 2.0]],
+            [[-2.7, -1.3], [-2.0, -0.4]],
+            [[-2.7, -1.3], [-4.5, -2.9]],
+            [[1.3, 2.7], [2.9, 4.5]],
+            [[1.3, 2.7], [0.4, 2.0]],
+            [[1.3, 2.7], [-2.0, -0.4]],
+            [[1.3, 2.7], [-4.5, -2.9]],
+        ]
 
         self.default_sionna_config = copy.deepcopy(self.sionna_config)
 
@@ -329,12 +341,13 @@ class DataCenterV0(Env):
 
     def _prepare_rx_positions(self):
         rx_pos = []
-        while len(rx_pos) < len(self.sionna_config["rx_positions"]):
-            x = self.np_rng.uniform(low=self.rx_pos_range[0][0], high=self.rx_pos_range[0][1])
-            y = self.np_rng.uniform(low=self.rx_pos_range[1][0], high=self.rx_pos_range[1][1])
-            pt = [x, y]
-            if self._is_eligible(pt, self.obstacle_pos, rx_pos):
-                rx_pos.append([x, y, 1.5])
+
+        # Pick 3 random ranges from rx_pos_ranges
+        rx_pos_ranges = self.np_rng.choice(self.rx_pos_ranges, len(self.rx_pos), replace=False)
+        for rx_pos_range in rx_pos_ranges:
+            x = self.np_rng.uniform(low=rx_pos_range[0][0], high=rx_pos_range[0][1])
+            y = self.np_rng.uniform(low=rx_pos_range[1][0], high=rx_pos_range[1][1])
+            rx_pos.append([x, y, 1.5])
 
         return rx_pos
 
