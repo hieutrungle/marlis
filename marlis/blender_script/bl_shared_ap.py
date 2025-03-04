@@ -49,6 +49,7 @@ def export_drl_hallway_hex(args):
     racks_names = []
     devices_names = []
     devices = {}
+    top_panel_names = []
 
     ref_idx = 0
     for k, v in bpy.data.collections.items():
@@ -72,6 +73,9 @@ def export_drl_hallway_hex(args):
 
         if "Obstacles" in k:
             obstacles_names.append(k)
+
+        if "TopPanel" in k:
+            top_panel_names.append(k)
 
     for i, (reflector, focal) in enumerate(zip(devices_names, focals)):
         object_dict = devices[reflector]
@@ -113,7 +117,15 @@ def export_drl_hallway_hex(args):
     bl_utils.save_mitsuba_xml(
         folder_dir,
         "scenee",
-        [*devices_names, *racks_names, *obstacles_names, "Wall", "Floor", "Ceiling", "TopPanel"],
+        [
+            *devices_names,
+            *racks_names,
+            *obstacles_names,
+            "Wall",
+            "Floor",
+            "Ceiling",
+            *top_panel_names,
+        ],
     )
 
 
