@@ -693,7 +693,7 @@ def train_agent(
         add_to_ob_storage(ob_storages, stored_obs)
 
         # ALGO LOGIC: training.
-        if global_step > config.learning_starts:
+        if global_step > config.learning_starts and config.load_eval_model == "-1":
             # ALGO LOGIC: update critics and actors
             log_infos = {}
             timer = time.time()
