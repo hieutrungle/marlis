@@ -46,7 +46,7 @@ class TrainConfig:
     ff_dim: int = 128  # the hidden dimension of the feedforward networks
 
     # Algorithm specific arguments
-    total_timesteps: int = 2_001  # total timesteps of the experiments
+    total_timesteps: int = 1_500  # total timesteps of the experiments
     n_updates: int = 5  # the number of updates per step
     buffer_size: int = int(40_000)  # the replay memory buffer size
     gamma: float = 0.99  # the discount factor gamma
