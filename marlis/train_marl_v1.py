@@ -506,7 +506,7 @@ def train_agent(
             total=config.start_step + config.total_timesteps + 1,
         )
         # info: {'env_idx': [num_envs, local_obs]}
-        obs, infos = envs.reset(options={"start_init": True, "eval_mode": True})
+        obs, infos = envs.reset(options={"start_init": True, "eval_mode": False})
     else:
         pbar = tqdm.tqdm(range(config.eval_ep_len), dynamic_ncols=True)
         obs, infos = envs.reset(options={"start_init": True, "eval_mode": True})
