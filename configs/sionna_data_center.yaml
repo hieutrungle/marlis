@@ -11,7 +11,7 @@ frequency: 60e9
 synthetic_array: true
 
 # Reflector parameters
-rt_positions: [[5.8, 0.0, 3.0], [-5.8, 0.0, 3.0]]
+rt_positions: [[5.7, 0.0, 2.8], [-5.7, 0.0, 2.8]]
 
 # Transmitter and receiver parameters
 tx_num_rows: 1
@@ -28,8 +28,10 @@ rx_vertical_spacing: 0.5
 rx_horizontal_spacing: 0.5
 rx_pattern: iso
 rx_polarization: V
-rx_positions: [[-4.5, -6.0, 1.5], [4.0, -2, 1.5], [0.0, 0.0, 1.5]]
-rx_orientations: [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]]
+rx_positions:
+    [[-4.5, -6.0, 1.5], [4.0, -2, 1.5], [0.0, 0.0, 1.5], [0.0, 0.0, 1.5]]
+rx_orientations:
+    [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]]
 
 # Path tracing parameters
 cm_max_depth: 10
