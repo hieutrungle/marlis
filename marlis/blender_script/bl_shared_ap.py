@@ -32,7 +32,10 @@ def export_drl_hallway_hex(args):
     theta_ranges = [(theta_config[1][i], theta_config[2][i]) for i in range(len(theta_config[1]))]
     phi_ranges = [(phi_config[1][i], phi_config[2][i]) for i in range(len(phi_config[1]))]
 
-    with open(args.input_path, "rb") as f:
+    with open(args.rt_delta_path, "rb") as f:
+        rt_delta_pos = pickle.load(f)
+
+    with open(args.focal_path, "rb") as f:
         # data: Tuple[np.ndarray[float], np.ndarray[float]]
         focals = pickle.load(f)
     focals = [focal.reshape(num_groups, 3) for focal in focals]
@@ -79,6 +82,7 @@ def export_drl_hallway_hex(args):
 
     for i, (reflector, focal) in enumerate(zip(devices_names, focals)):
         object_dict = devices[reflector]
+        rt_delta = rt_delta_pos[i]
         for j, (group_name, objects) in enumerate(object_dict.items()):
             r_mid, theta_mid, phi_mid = focal[j]
             focal_vec = bl_utils.spherical2cartesian(r_mid, theta_mid, phi_mid)
@@ -88,19 +92,21 @@ def export_drl_hallway_hex(args):
             theta_mid = shared_utils.constraint_angle(theta_mid, theta_ranges[i])
             angles[i][j * (num_elements_per_group + 1)] = phi_mid
 
+            # loop through all elements in a group/column
             for k, obj in enumerate(objects):
                 center = bl_utils.get_center_bbox(obj)
                 r, theta, phi = bl_utils.compute_rot_angle(center, focal_pt)
                 theta = shared_utils.constraint_angle(theta, theta_ranges[i])
                 phi = shared_utils.constraint_angle(phi, phi_ranges[i])
                 obj.rotation_euler = [0, theta, phi]
+                obj.location = [p + d for p, d in zip(obj.location, rt_delta)]
                 angles[i][j * (num_elements_per_group + 1) + k + 1] = theta
 
-    result_path = args.input_path
+    result_path = args.focal_path
     with open(result_path, "wb") as f:
         pickle.dump(angles, f)
 
-    result_path = args.input_path
+    result_path = args.focal_path
     with open(result_path, "wb") as f:
         pickle.dump(angles, f)
 
@@ -138,7 +144,8 @@ def create_argparser() -> bl_parser.ArgumentParserForBlender:
     """Parses command line arguments."""
     parser = bl_parser.ArgumentParserForBlender()
     parser.add_argument("--scene_name", "-s", type=str, required=True)
-    parser.add_argument("--input_path", "-i", type=str, required=True)
+    parser.add_argument("--focal_path", type=str, required=True)
+    parser.add_argument("--rt_delta_path", type=str, required=True)
     parser.add_argument("--output_dir", "-o", type=str, required=True)
     parser.add_argument("--verbose", "-v", action="store_true", default=False)
     parser.add_argument("--index", type=str)
