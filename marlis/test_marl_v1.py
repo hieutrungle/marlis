@@ -389,7 +389,7 @@ def train_agent(
             qf_next_target01 = qfs_target[0][1](data["next_local0_obs"], next_actions0)
             min_qf_next_target0 = torch.minimum(qf_next_target00, qf_next_target01)
             min_qf_next_target0 = min_qf_next_target0 - alphas[0] * next_log_pi0
-            next_q_value0 = data["rewards"].flatten() + config.gamma * (
+            next_q_value0 = data["local0_rewards"].flatten() + config.gamma * (
                 1.0 - data["terminations"].float().flatten()
             ) * min_qf_next_target0.view(-1)
 
@@ -398,7 +398,7 @@ def train_agent(
             qf_next_target11 = qfs_target[1][1](data["next_local1_obs"], next_actions1)
             min_qf_next_target1 = torch.minimum(qf_next_target10, qf_next_target11)
             min_qf_next_target1 = min_qf_next_target1 - alphas[1] * next_log_pi1
-            next_q_value1 = data["rewards"].flatten() + config.gamma * (
+            next_q_value1 = data["local1_rewards"].flatten() + config.gamma * (
                 1.0 - data["terminations"].float().flatten()
             ) * min_qf_next_target1.view(-1)
 
@@ -553,8 +553,6 @@ def train_agent(
             obs, _ = envs.reset(seed=config.seed)
             continue
 
-        # TODO: get local reward from infos
-
         # ENV: handle `final_observation`
         if "final_info" in infos:
             # log episodic returns
@@ -574,11 +572,12 @@ def train_agent(
             prev_path_gains = [info["prev_path_gains"] for info in infos["final_info"]]
             path_gains = [info["path_gains"] for info in infos["final_info"]]
             next_local_obs = np.array([ob for ob in infos["reset_local_obs"]], dtype=np.float32)
-
+            local_rewards = [info["local_rewards"] for info in infos["final_info"]]
         else:
             prev_path_gains = infos["prev_path_gains"]
             path_gains = infos["path_gains"]
             next_local_obs = np.array([ob for ob in infos["next_local_obs"]], dtype=np.float32)
+            local_rewards = infos["local_rewards"]
 
         prev_path_gains = np.stack(prev_path_gains)
         path_gains = np.stack(path_gains)
@@ -608,6 +607,10 @@ def train_agent(
         local_actions = np.reshape(actions, (envs.num_envs, 2, -1))
         local_actions = np.transpose(local_actions, (1, 0, 2))
 
+        # [num_envs, num_reflector]
+        local_rewards = np.array([r for r in local_rewards], dtype=np.float32)
+        local_rewards = np.transpose(local_rewards, (1, 0))  # [num_reflector, num_envs]
+
         transition = TensorDict(
             global_obs=obs,
             global_actions=actions,
@@ -616,6 +619,8 @@ def train_agent(
             local0_actions=local_actions[0],
             local1_actions=local_actions[1],
             rewards=rewards,
+            local0_rewards=local_rewards[0],
+            local1_rewards=local_rewards[1],
             terminations=terminations,
             truncations=truncations,
             prev_path_gains=prev_path_gains,
