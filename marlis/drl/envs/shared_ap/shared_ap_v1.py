@@ -159,8 +159,8 @@ class SharedAPV1(Env):
         # range for new rx positions: [[x_min, x_max], [y_min, y_max]]
         self.rx_pos_ranges = [
             [[0.2, 3.5], [-1.0, 2.0]],
-            [[0.2, 3.5], [-1.0, 2.0]],
-            [[-3.5, -0.2], [-5.5, -1.5]],
+            [[0.2, 3.5], [-5.5, -1.5]],
+            [[-3.5, -0.2], [-1.0, 2.0]],
             [[-3.5, -0.2], [-5.5, -1.5]],
         ]
 
@@ -300,15 +300,18 @@ class SharedAPV1(Env):
         return False
 
     def _prepare_rx_positions(self):
-        # Pick 3 random ranges from rx_pos_ranges
+        # Pick ranges from rx_pos_ranges
         rx_pos = []
         rx_pos_ranges = self.np_rng.choice(self.rx_pos_ranges, len(self.rx_pos), replace=False)
         for rx_pos_range in rx_pos_ranges:
-            x = self.np_rng.uniform(low=rx_pos_range[0][0], high=rx_pos_range[0][1])
-            y = self.np_rng.uniform(low=rx_pos_range[1][0], high=rx_pos_range[1][1])
-            pt = [x, y]
-            if self._is_eligible(pt, [], rx_pos):
-                rx_pos.append([x, y, 1.5])
+            pt = None
+            while not pt:
+                x = self.np_rng.uniform(low=rx_pos_range[0][0], high=rx_pos_range[0][1])
+                y = self.np_rng.uniform(low=rx_pos_range[1][0], high=rx_pos_range[1][1])
+                tmp = [x, y]
+                if self._is_eligible(tmp, [], rx_pos):
+                    pt = tmp
+                    rx_pos.append([x, y, 1.5])
 
         return rx_pos
 
@@ -327,7 +330,6 @@ class SharedAPV1(Env):
         self.sionna_config = copy.deepcopy(self.default_sionna_config)
 
         # reset rx_pos
-        # TODO: make sure that the new rx_pos is not too close to each other
         rx_pos = self._prepare_rx_positions()
         self.sionna_config["rx_positions"] = rx_pos
         self.rx_pos = np.array(rx_pos, dtype=np.float32)

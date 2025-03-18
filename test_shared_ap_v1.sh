@@ -79,6 +79,6 @@ mkdir -p ${OPTIX_CACHE_PATH}
 # DRL run
 ##############################
 export OPTIX_CACHE_PATH=${TMP_DIR}/optix_cache_1
-python ./marlis/run_test_marl_v1.py --sionna_config_file ${SIONNA_CONFIG_FILE} --verbose True --env_id "shared-ap-v1" --group "SharedAP1" --name "TEST_no_compile" --ff_dim 128 --save_interval 5 --learning_starts 0 --total_timesteps 20 --n_runs 0 --init_learning_starts 10 --ep_len 8 --batch_size 4 --num_envs 1 --eval_ep_len 3 --no_eval True --seed 22 --wandb "offline"
+python ./marlis/run_test_marl_v1.py --sionna_config_file ${SIONNA_CONFIG_FILE} --verbose True --env_id "shared-ap-v1" --group "SharedAP1" --name "TEST_no_compile" --ff_dim 64 --save_interval 100 --learning_starts 0 --total_timesteps 400 --n_runs 0 --init_learning_starts 200 --ep_len 50 --batch_size 64 --num_envs 1 --eval_ep_len 30 --no_eval True --seed 22 --wandb "offline"
 
 # python ./marlis/run_test_marl_v1.py --sionna_config_file ${SIONNA_CONFIG_FILE} --verbose True --env_id "shared-ap-v1" --group "SharedAP1" --name "Default" --use_compile True

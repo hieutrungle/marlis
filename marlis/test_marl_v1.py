@@ -506,7 +506,7 @@ def train_agent(
             total=config.start_step + config.total_timesteps + 1,
         )
         # info: {'env_idx': [num_envs, local_obs]}
-        obs, infos = envs.reset(options={"start_init": True, "eval_mode": True})
+        obs, infos = envs.reset(options={"start_init": True, "eval_mode": False})
     else:
         pbar = tqdm.tqdm(range(config.eval_ep_len), dynamic_ncols=True)
         obs, infos = envs.reset(options={"start_init": True, "eval_mode": True})
@@ -523,7 +523,6 @@ def train_agent(
         print(f"Step: {global_step}")
         # ALGO LOGIC: action logic
         if config.start_step == 0 and global_step < config.learning_starts:
-            # TODO: action logic
             # [num_envs, global_ac_dim], global_ac_dim = num_reflectors * local_ac_dim
             actions = np.array([envs.single_action_space.sample() for _ in range(envs.num_envs)])
             # actions = np.ones_like(actions) * (-5.0)
@@ -555,6 +554,8 @@ def train_agent(
             time.sleep(2)
             obs, _ = envs.reset(seed=config.seed)
             continue
+
+        # TODO: get local reward from infos
 
         # ENV: handle `final_observation`
         if "final_info" in infos:
