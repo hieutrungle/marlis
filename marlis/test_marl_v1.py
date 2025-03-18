@@ -520,12 +520,10 @@ def train_agent(
     metric_desc = ""
 
     for global_step in pbar:
-        print(f"Step: {global_step}")
         # ALGO LOGIC: action logic
         if config.start_step == 0 and global_step < config.learning_starts:
             # [num_envs, global_ac_dim], global_ac_dim = num_reflectors * local_ac_dim
             actions = np.array([envs.single_action_space.sample() for _ in range(envs.num_envs)])
-            # actions = np.ones_like(actions) * (-5.0)
         else:
             # ` TODO: put local action here
             # [num_envs, global_ac_dim], global_ac_dim = num_reflectors * local_ac_dim
