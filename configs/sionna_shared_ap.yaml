@@ -7,7 +7,7 @@ verbose: true
 cam_position: [0.0, 2.1, 55.0]
 cam_orientation: [0.0, 0.0, 0.0]
 cam_look_at: [0.0, 2.2, 0.0]
-frequency: 28e9
+frequency: 60e9
 synthetic_array: true
 
 # Reflector parameters
