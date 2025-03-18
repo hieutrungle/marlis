@@ -66,7 +66,7 @@ class SharedAPV1(Env):
 
         # Set up action and observation space
         # Load the reflector configuration, angle is in radians
-        reflector_configs = shared_utils.get_config_data_center()
+        reflector_configs = shared_utils.get_config_shared_ap()
         self.theta_configs = reflector_configs[0]
         self.phi_configs = reflector_configs[1]
         self.num_groups = reflector_configs[2]
@@ -291,15 +291,12 @@ class SharedAPV1(Env):
         for pos in obstacle_pos:
             if np.linalg.norm(np.array(pos[:2]) - np.array(pt)) < 0.7:
                 is_obs_overlaped = True
-                # print(f"Obstacle at {pos[:2]} is too close to {pt}")
                 break
 
         # make sure that distance between rx_pos is at least 1
         if not is_obs_overlaped:
             if not any(np.linalg.norm(np.array(pos[:2]) - np.array(pt)) < 1.5 for pos in rx_pos):
-                # print("Eligible position found at", pt)
                 return True
-        # print(f"Position {pt} is not eligible")
         return False
 
     def _prepare_rx_positions(self):
@@ -309,7 +306,9 @@ class SharedAPV1(Env):
         for rx_pos_range in rx_pos_ranges:
             x = self.np_rng.uniform(low=rx_pos_range[0][0], high=rx_pos_range[0][1])
             y = self.np_rng.uniform(low=rx_pos_range[1][0], high=rx_pos_range[1][1])
-            rx_pos.append([x, y, 1.5])
+            pt = [x, y]
+            if self._is_eligible(pt, [], rx_pos):
+                rx_pos.append([x, y, 1.5])
 
         return rx_pos
 
@@ -328,6 +327,7 @@ class SharedAPV1(Env):
         self.sionna_config = copy.deepcopy(self.default_sionna_config)
 
         # reset rx_pos
+        # TODO: make sure that the new rx_pos is not too close to each other
         rx_pos = self._prepare_rx_positions()
         self.sionna_config["rx_positions"] = rx_pos
         self.rx_pos = np.array(rx_pos, dtype=np.float32)
@@ -363,6 +363,10 @@ class SharedAPV1(Env):
         for i in range(len(self.rt_pos)):
             low = self.focal_spaces[i].low
             high = self.focal_spaces[i].high
+            center = (low + high) / 2.0
+            # make low slightly higher than the old low
+            low = center - (center - low) * 0.9
+            high = center + (high - center) * 0.9
             if start_init:
                 self.focals[i] = self.np_rng.uniform(low=low, high=high)
             else:
@@ -422,9 +426,15 @@ class SharedAPV1(Env):
 
         # focal shape: [num_reflectors, num_groups * 3]
         self.focals = self.focals + action
+
         low = np.asarray([space.low for space in self.focal_spaces])
         high = np.asarray([space.high for space in self.focal_spaces])
-        out_of_bounds = np.sum((self.focals < low) + (self.focals > high), dtype=np.float32)
+        local_out_of_bounds = [
+            np.sum((focal < low[i]) + (focal > high[i]), dtype=np.float32)
+            for i, focal in enumerate(self.focals)
+        ]
+        out_of_bounds = np.sum(local_out_of_bounds, dtype=np.float32)
+
         self.focals = np.clip(self.focals, low, high)
 
         self.angles = self._blender_step(self.focals)
@@ -441,8 +451,14 @@ class SharedAPV1(Env):
         terminated = False
         self.cur_gains = self._run_sionna_dB(eval_mode=self.eval_mode)
 
-        reward = self._cal_reward(self.prev_gains, self.cur_gains, out_of_bounds)
-
+        # np.mean(cur_gains, axis=1) -> [num_rx]
+        global_reward = self._cal_reward(
+            np.mean(self.prev_gains, axis=1), np.mean(self.cur_gains, axis=1), out_of_bounds
+        )
+        local_rewards = [
+            self._cal_reward(self.prev_gains[:, i], self.cur_gains[:, i], local_out_of_bounds[i])
+            for i in range(len(self.rt_pos))
+        ]
         step_info = {
             "prev_path_gains": self.prev_gains,
             "path_gains": self.cur_gains,
@@ -462,24 +478,27 @@ class SharedAPV1(Env):
             ).flatten()
             next_local_obs[i] = local_ob
         step_info[f"next_local_obs"] = next_local_obs
+        step_info[f"local_rewards"] = local_rewards
 
-        return next_observation, reward, terminated, truncated, step_info
+        return next_observation, global_reward, terminated, truncated, step_info
 
     def _cal_reward(
         self, prev_gains: np.ndarray, cur_gains: np.ndarray, out_of_bounds: float
     ) -> float:
 
+        # path gain shape: [num_rx]
         adjusted_gain = np.mean(cur_gains)
         adjusted_gain = np.where(
-            adjusted_gain < -80.0,
-            (adjusted_gain + 80.0) / 10.0,
-            (adjusted_gain + 80.0) / 5.0 + 1.5,
+            adjusted_gain < -100.0,
+            (adjusted_gain + 100.0) / 10.0,
+            (adjusted_gain + 100.0) / 10.0 + 1.0,
         )
         gain_diff = np.mean(cur_gains - prev_gains)
 
-        reward = float(adjusted_gain + 0.03 * gain_diff - 0.3 * out_of_bounds) / 2.0
+        reward = float(adjusted_gain + 0.1 * gain_diff - 0.3 * out_of_bounds) / 2.0
 
         return reward
+        # return 0.0
 
     def _blender_step(self, focals: np.ndarray[float]) -> np.ndarray[float]:
         """
@@ -542,7 +561,7 @@ class SharedAPV1(Env):
     def _run_sionna_dB(self, eval_mode: bool = False) -> np.ndarray[np.complex64, float]:
 
         # self._prepare_geometry()
-        # path gain shape: [num_rx]
+        # path gain shape: [num_rx, num_tx]
         path_gains = self._run_sionna(eval_mode=eval_mode)
         path_gain_dBs = utils.linear2dB(path_gains)
         return path_gain_dBs
@@ -561,15 +580,11 @@ class SharedAPV1(Env):
         sig_cmap = sigmap.engine.SignalCoverageMap(
             self.sionna_config, compute_scene_path, viz_scene_path
         )
-        coverage_map = sig_cmap.compute_cmap()
-        path_gains = []
-        for pos in coverage_map.rx_pos:
-            path_gain = coverage_map.path_gain[:, pos[1], pos[0]]
-            path_gains.append(path_gain[0])
-        path_gains = np.asarray(path_gains)
 
         if eval_mode:
-            # Path for outputing iamges if we want to visualize the coverage map
+            coverage_map = sig_cmap.compute_cmap()
+
+            # Path for outputing images if we want to visualize the coverage map
             img_dir = os.path.join(
                 assets_dir, "images", self.log_string + self.current_time + f"_{self.idx}"
             )
@@ -577,6 +592,22 @@ class SharedAPV1(Env):
             sig_cmap.render_to_file(coverage_map, filename=render_filename)
 
         sig_cmap.free_memory()
+
+        paths = sig_cmap.compute_paths()
+        # shape of a: [batch_size, num_rx, num_rx_ant, num_tx, num_tx_ant, max_num_paths, num_time_steps]
+        a, tau = paths.cir(ris=False, cluster_ris_paths=False)
+        # [batch size, num_rx, num_rx_ant, num_tx, num_tx_ant, num_time_steps, fft_size]
+        h_freq = cir_to_ofdm_channel(self.sionna_config["frequency"], a, tau, normalize=False)
+
+        path_gains = tf.reduce_mean(tf.square(tf.abs(h_freq)), axis=(0, 2, 4, 5, 6))
+        # path_loss = tf.sqrt(path_loss)
+
+        # print(f"path_loss from path computation: {utils.linear2dB(path_gains)}")
+
+        # path_loss_avg = tf.reduce_mean(path_gains, axis=-1)
+        # print(f"path_loss from path_loss_avg computation: {utils.linear2dB(path_loss_avg)}\n")
+
+        # # h_avg_power = tf.reduce_mean(tf.abs(h_freq) ** 2)
 
         return path_gains
 
