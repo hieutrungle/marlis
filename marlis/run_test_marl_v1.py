@@ -44,6 +44,7 @@ class TrainConfig:
 
     # Network specific arguments
     ff_dim: int = 128  # the hidden dimension of the feedforward networks
+    net_type: str = "simple"  # the type of the network
 
     # Algorithm specific arguments
     total_timesteps: int = 1_500  # total timesteps of the experiments
@@ -194,6 +195,8 @@ def get_base_cmd(config: TrainConfig):
         # network specific arguments
         "--ff_dim",
         str(config.ff_dim),
+        "--net_type",
+        str(config.net_type),
         # algorithm specific arguments
         "--total_timesteps",
         str(config.total_timesteps),

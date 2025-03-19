@@ -34,7 +34,7 @@ import traceback
 import multiprocessing as mp
 import marlis
 from marlis.utils import utils, pytorch_utils, running_mean
-from marlis.drl.agents.marl_sac_v1 import Actor, SoftQNetwork
+from marlis.drl.agents import marl_sac_v1, marl_sac_v1_simple
 import matplotlib.pyplot as plt
 from marlis.drl.envs import register_envs
 
@@ -69,6 +69,7 @@ class TrainConfig:
 
     # Network specific arguments
     ff_dim: int = 256  # the hidden dimension of the feedforward networks
+    net_type: str = "simple"  # the type of the network
 
     # Algorithm specific arguments
     total_timesteps: int = 10_001  # total timesteps of the experiments
@@ -208,8 +209,18 @@ def main(config: TrainConfig):
     ob_space = envs.single_observation_space
     ac_space = envs.single_action_space
 
+    # Network setup
+    if config.net_type == "simple":
+        actor_net = marl_sac_v1_simple.Actor
+        critic_net = marl_sac_v1_simple.SoftQNetwork
+    else:
+        actor_net = marl_sac_v1.Actor
+        critic_net = marl_sac_v1.SoftQNetwork
+
     # Local actors
-    actors = [Actor(envs=envs, ff_dim=config.ff_dim, device=config.device, idx=i) for i in range(2)]
+    actors = [
+        actor_net(envs=envs, ff_dim=config.ff_dim, device=config.device, idx=i) for i in range(2)
+    ]
 
     local_ob_spaces = envs.get_attr("local_observation_spaces")[0]
     local_ac_spaces = envs.get_attr("local_action_spaces")[0]
@@ -227,13 +238,13 @@ def main(config: TrainConfig):
     for i in range(2):
         qfs.append(
             [
-                SoftQNetwork(envs=envs, ff_dim=config.ff_dim, device=config.device, idx=i)
+                critic_net(envs=envs, ff_dim=config.ff_dim, device=config.device, idx=i)
                 for _ in range(2)
             ]
         )
         qfs_target.append(
             [
-                SoftQNetwork(envs=envs, ff_dim=config.ff_dim, device=config.device, idx=i)
+                critic_net(envs=envs, ff_dim=config.ff_dim, device=config.device, idx=i)
                 for _ in range(2)
             ]
         )
@@ -248,11 +259,9 @@ def main(config: TrainConfig):
     )
 
     # Global critic networks
-    gqfs = [
-        SoftQNetwork(envs=envs, ff_dim=2 * config.ff_dim, device=config.device) for _ in range(2)
-    ]
+    gqfs = [critic_net(envs=envs, ff_dim=2 * config.ff_dim, device=config.device) for _ in range(2)]
     gqfs_target = [
-        SoftQNetwork(envs=envs, ff_dim=2 * config.ff_dim, device=config.device) for _ in range(2)
+        critic_net(envs=envs, ff_dim=2 * config.ff_dim, device=config.device) for _ in range(2)
     ]
     for i in range(2):
         gqfs_target[i].load_state_dict(gqfs[i].state_dict())
@@ -358,8 +367,8 @@ def main(config: TrainConfig):
 def train_agent(
     config: TrainConfig,
     envs: gym.vector.VectorEnv,
-    actors: List[Actor],
-    critics: List[List[SoftQNetwork]],
+    actors: List[marl_sac_v1_simple.Actor],
+    critics: List[List[marl_sac_v1.SoftQNetwork]],
     log_alphas: List[torch.Tensor],
     optimizers: List[optim.Optimizer],
     rb: ReplayBuffer,
@@ -565,8 +574,7 @@ def train_agent(
             std_ret = torch.tensor(avg_returns).std()
             log_dict = {"episodic_return": avg_ret, "episodic_return_std": std_ret}
             desc = f"global_step={global_step}, episodic_return={avg_ret: 4.2f} (max={max_ep_ret: 4.2f})"
-            with wandb.init() as run:
-                run.log(log_dict, step=global_step)
+            wandb.log(log_dict, step=global_step)
 
             # get path gains
             prev_path_gains = [info["prev_path_gains"] for info in infos["final_info"]]
@@ -706,8 +714,7 @@ def train_agent(
                     "train/actor1_entropy": (-log_infos["log_pi1"]).mean().item(),
                     "train/train_time": train_time,
                 }
-            with wandb.init() as run:
-                run.log({**logs}, step=global_step)
+            wandb.log({**logs}, step=global_step)
             metric_desc = f" | actor_loss={logs['train/actor_loss']: 4.3f} | qf_loss={logs['train/qf_loss']: 4.3f}"
 
             # MODULE: Save modules
