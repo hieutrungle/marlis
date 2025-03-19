@@ -197,10 +197,10 @@ def main(config: TrainConfig):
         utils.log_config(sionna_config)
 
     # env setup
-    # envs = gym.vector.AsyncVectorEnv(
-    #     [make_env(config, i) for i in range(config.num_envs)], context="spawn"
-    # )
-    envs = gym.vector.SyncVectorEnv([make_env(config, i) for i in range(config.num_envs)])
+    envs = gym.vector.AsyncVectorEnv(
+        [make_env(config, i) for i in range(config.num_envs)], context="spawn"
+    )
+    # envs = gym.vector.SyncVectorEnv([make_env(config, i) for i in range(config.num_envs)])
 
     assert isinstance(
         envs.single_action_space, gym.spaces.Box
@@ -564,9 +564,9 @@ def train_agent(
             avg_ret = torch.tensor(avg_returns).mean()
             std_ret = torch.tensor(avg_returns).std()
             log_dict = {"episodic_return": avg_ret, "episodic_return_std": std_ret}
-
             desc = f"global_step={global_step}, episodic_return={avg_ret: 4.2f} (max={max_ep_ret: 4.2f})"
-            wandb.log(log_dict, step=global_step)
+            with wandb.init() as run:
+                run.log(log_dict, step=global_step)
 
             # get path gains
             prev_path_gains = [info["prev_path_gains"] for info in infos["final_info"]]
@@ -706,8 +706,8 @@ def train_agent(
                     "train/actor1_entropy": (-log_infos["log_pi1"]).mean().item(),
                     "train/train_time": train_time,
                 }
-
-            wandb.log({**logs}, step=global_step)
+            with wandb.init() as run:
+                run.log({**logs}, step=global_step)
             metric_desc = f" | actor_loss={logs['train/actor_loss']: 4.3f} | qf_loss={logs['train/qf_loss']: 4.3f}"
 
             # MODULE: Save modules
