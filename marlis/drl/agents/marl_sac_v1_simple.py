@@ -235,8 +235,6 @@ class SoftQNetwork(nn.Module):
 
         # Combine all
         self.combine_network = nn.Sequential(
-            nn.Linear(ff_dim * 2, ff_dim * 2, device=device),
-            nn.GELU(),
             nn.Linear(ff_dim * 2, ff_dim, device=device),
             nn.GELU(),
             nn.Linear(ff_dim, 1, device=device),
