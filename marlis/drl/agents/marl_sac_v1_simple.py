@@ -60,6 +60,36 @@ LOG_STD_MAX = 2
 LOG_STD_MIN = -5
 
 
+class SimpleBlock(nn.Module):
+    def __init__(
+        self,
+        in_features: int,
+        out_features: int,
+        multiplier: int = 2,
+        num_layers=3,
+        device=torch.device("cpu"),
+        bias=True,
+    ):
+        super().__init__()
+        layers = nn.ModuleList()
+        layers.append(nn.Linear(in_features, out_features * multiplier, bias=bias, device=device))
+        layers.append(nn.GELU())
+        for _ in range(num_layers - 2):
+            layers.append(
+                nn.Linear(
+                    in_features * multiplier, out_features * multiplier, bias=bias, device=device
+                )
+            )
+            layers.append(nn.GELU())
+        layers.append(nn.Linear(out_features * multiplier, out_features, bias=bias, device=device))
+        layers.append(nn.GELU())
+        self.block = nn.Sequential(*layers)
+        self.layer_norm = nn.LayerNorm(out_features, device=device)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.layer_norm(self.block(x) + x)
+
+
 class Actor(nn.Module):
     def __init__(
         self,
@@ -79,19 +109,26 @@ class Actor(nn.Module):
 
         # positions
         self.pos_embed = Embedder(np.prod(self.position_shape), num_freqs=5)
-        pos_out_dim = self.pos_embed.out_dim
-
-        self.ob_layers = [
-            nn.Linear(
-                np.prod(self.angle_shape) + pos_out_dim,
-                ff_dim,
-                device=device,
-            ),
+        self.pos_block = [
+            nn.Linear(self.pos_embed.out_dim, ff_dim, device=device),
             nn.GELU(),
-            MLPBlock(ff_dim, ff_dim, device=device),
-            MLPBlock(ff_dim, ff_dim, device=device),
+            SimpleBlock(ff_dim, ff_dim, num_layers=3, device=device),
         ]
-        self.connect_network = nn.Sequential(*self.ob_layers)
+        self.pos_block = nn.Sequential(*self.pos_block)
+
+        # fully connect for angles
+        self.angle_block = [
+            nn.Linear(np.prod(self.angle_shape), ff_dim, device=device),
+            nn.GELU(),
+            SimpleBlock(ff_dim, ff_dim, multiplier=1, num_layers=2, device=device),
+        ]
+        self.angle_block = nn.Sequential(*self.angle_block)
+
+        # Connect all
+        self.connect_network = nn.Sequential(
+            nn.Linear(ff_dim * 2, ff_dim, device=device),
+            nn.GELU(),
+        )
 
         self.fc_mean = nn.Linear(ff_dim, np.prod(self.ac_shape), device=device)
         self.fc_log_std = nn.Linear(ff_dim, np.prod(self.ac_shape), device=device)
@@ -115,8 +152,11 @@ class Actor(nn.Module):
         # angles
         angle = obs[..., : -np.prod(self.position_shape)]
 
-        ob = torch.cat([angle, pos], dim=-1)
-        combined = self.connect_network(ob)
+        pos = self.pos_block(pos)
+        angle = self.angle_block(angle)
+
+        combined = torch.cat([angle, pos], dim=-1)
+        combined = self.connect_network(combined)
 
         # mean and log_std
         mean = self.fc_mean(combined)
@@ -168,29 +208,39 @@ class SoftQNetwork(nn.Module):
 
         # positions
         self.pos_embed = Embedder(np.prod(self.position_shape), num_freqs=5)
-        pos_out_dim = self.pos_embed.out_dim
-
-        self.ob_layers = [
-            nn.Linear(np.prod(self.angle_shape) + pos_out_dim, ff_dim, device=device),
+        self.pos_block = [
+            nn.Linear(self.pos_embed.out_dim, ff_dim, device=device),
             nn.GELU(),
-            MLPBlock(ff_dim, ff_dim, device=device),
-            MLPBlock(ff_dim, ff_dim, device=device),
+            SimpleBlock(ff_dim, ff_dim, num_layers=3, device=device),
         ]
-        self.connect_network = nn.Sequential(*self.ob_layers)
+        self.pos_block = nn.Sequential(*self.pos_block)
+
+        # fully connect for angles
+        self.angle_block = [
+            nn.Linear(np.prod(self.angle_shape), ff_dim, device=device),
+            nn.GELU(),
+            SimpleBlock(ff_dim, ff_dim, multiplier=1, num_layers=2, device=device),
+        ]
+        self.angle_block = nn.Sequential(*self.angle_block)
+
+        # Connect all
+        self.connect_network = nn.Sequential(
+            nn.Linear(ff_dim * 2, ff_dim, device=device),
+            nn.GELU(),
+        )
 
         # action
-        action_layers = [
-            nn.Linear(np.prod(ac_space.shape), ff_dim, device=device),
-            nn.GELU(),
-            MLPBlock(ff_dim, ff_dim, device=device),
-        ]
+        action_layers = [nn.Linear(np.prod(ac_space.shape), ff_dim, device=device), nn.GELU()]
         self.action_network = nn.Sequential(*action_layers)
 
         # Combine all
         self.combine_network = nn.Sequential(
-            nn.Linear(ff_dim * 2, ff_dim, device=device), nn.GELU()
+            nn.Linear(ff_dim * 2, ff_dim * 2, device=device),
+            nn.GELU(),
+            nn.Linear(ff_dim * 2, ff_dim, device=device),
+            nn.GELU(),
+            nn.Linear(ff_dim, 1, device=device),
         )
-        self.combine_layer = nn.Linear(ff_dim, 1, device=device)
 
     def forward(self, obs, acs):
         pos = obs[..., -np.prod(self.position_shape) :]
@@ -201,13 +251,15 @@ class SoftQNetwork(nn.Module):
         # angles
         angle = obs[..., : -np.prod(self.position_shape)]
 
-        ob = torch.cat([angle, pos], dim=-1)
-        combined = self.connect_network(ob)
+        pos = self.pos_block(pos)
+        angle = self.angle_block(angle)
+
+        combined = torch.cat([angle, pos], dim=-1)
+        combined = self.connect_network(combined)
 
         # action
         action = self.action_network(acs)
 
         # combine
-        ob_ac = self.combine_network(torch.cat([combined, action], dim=-1))
-        q_values = self.combine_layer(ob_ac)
+        q_values = self.combine_network(torch.cat([combined, action], dim=-1))
         return q_values
